@@ -280,6 +280,7 @@ class OpenAIClient:
             The completion.
         """
         iostream = IOStream.get_default()
+        process_llm_token = params.get("process_llm_token", lambda x: {"chunk": x})
 
         completions: Completions = self._oai_client.chat.completions if "messages" in params else self._oai_client.completions  # type: ignore [attr-defined]
         # If streaming is enabled and has messages, then iterate over the chunks of the response.
@@ -341,7 +342,7 @@ class OpenAIClient:
 
                         # If content is present, print it to the terminal and update response variables
                         if content is not None:
-                            iostream.print(content, end="", flush=True)
+                            iostream.print(process_llm_token(content), end="", flush=True)
                             response_contents[choice.index] += content
                             completion_tokens += 1
                         else:
