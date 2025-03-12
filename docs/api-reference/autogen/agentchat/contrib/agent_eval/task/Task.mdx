@@ -11,19 +11,13 @@ title: autogen.agentchat.contrib.agent_eval.task.Task
 Task(**data: Any)
 ```
 
-    Class representing a task for agent completion, includes example agent execution for criteria generation.
-    
-    Create a new model by parsing and validating input data from keyword arguments.
-    
-    Raises [`ValidationError`][pydantic_core.ValidationError] if the input data cannot be
-    validated to form a valid model.
-    
-    `self` is explicitly positional-only to allow `self` as a field name.
+    Class representing a task for agent completion, includes example agent execution for criteria generation.<br/>Create a new model by parsing and validating input data from keyword arguments.<br/>Raises [`ValidationError`][pydantic_core.ValidationError] if the input data cannot be
+    validated to form a valid model.<br/>`self` is explicitly positional-only to allow `self` as a field name.
 
 <b>Parameters:</b>
 | Name | Description |
 |--|--|
-| `**data` | **Type:** `Any` |
+| `**data` | **Type:** Any |
 
 ### Class Attributes
 
@@ -63,15 +57,20 @@ Task(**data: Any)
 #### parse_json_str
 
 ```python
-parse_json_str(task: str) -> 
+parse_json_str(task: str) -> Task
 ```
 
-    Create a Task object from a json object.
+    Create a Task object from a json object.<br/>
 
 <b>Parameters:</b>
 | Name | Description |
 |--|--|
-| `task` | **Type:** `str` |
+| `task` | A json string that represents the task information.<br/><br/>**Type:** str |
+
+<b>Returns:</b>
+| Type | Description |
+|--|--|
+| [Task](/docs/api-reference/autogen/agentchat/contrib/agent_eval/task/Task) | Task: A Task object that represents the json task information. |
 
 <br />
 

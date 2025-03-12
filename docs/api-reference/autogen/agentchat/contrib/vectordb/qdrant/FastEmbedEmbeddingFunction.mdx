@@ -8,14 +8,24 @@ title: autogen.agentchat.contrib.vectordb.qdrant.FastEmbedEmbeddingFunction
 </h2>
 
 ```python
-FastEmbedEmbeddingFunction(**kwargs)
+FastEmbedEmbeddingFunction(
+    model_name: str = 'BAAI/bge-small-en-v1.5',
+    batch_size: int = 256,
+    cache_dir: str | None = None,
+    threads: int | None = None,
+    parallel: int | None = None,
+    **kwargs: Any
+)
 ```
 
-    Embedding function implementation using FastEmbed - https://qdrant.github.io/fastembed.
-    
-    Initialize fastembed.TextEmbedding.
+    Embedding function implementation using FastEmbed - https://qdrant.github.io/fastembed.<br/>Initialize fastembed.TextEmbedding.<br/>
 
 <b>Parameters:</b>
 | Name | Description |
 |--|--|
-| `**kwargs` | Additional options to pass to fastembed.TextEmbedding<br/><br/> |
+| `model_name` | **Type:** str<br/><br/>**Default:** 'BAAI/bge-small-en-v1.5' |
+| `batch_size` | **Type:** int<br/><br/>**Default:** 256 |
+| `cache_dir` | **Type:** str \| None<br/><br/>**Default:** None |
+| `threads` | **Type:** int \| None<br/><br/>**Default:** None |
+| `parallel` | **Type:** int \| None<br/><br/>**Default:** None |
+| `**kwargs` | **Type:** Any |

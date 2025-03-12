@@ -12,9 +12,7 @@ CrewAIInteroperability()
 ```
 
     A class implementing the `Interoperable` protocol for converting CrewAI tools
-    to a general `Tool` format.
-    
-    This class takes a `CrewAITool` and converts it into a standard `Tool` object.
+    to a general `Tool` format.<br/>This class takes a `CrewAITool` and converts it into a standard `Tool` object.
 
 ### Static Methods
 
@@ -22,25 +20,28 @@ CrewAIInteroperability()
 #### convert_tool
 
 ```python
-convert_tool(tool: Any, **kwargs: Any) -> autogen.tools.tool.Tool
+convert_tool(
+    cls,
+    tool: Any,
+    **kwargs: Any
+) -> Tool
 ```
 
-    Converts a given CrewAI tool into a general `Tool` format.
-    
-    This method ensures that the provided tool is a valid `CrewAITool`, sanitizes
+    Converts a given CrewAI tool into a general `Tool` format.<br/>This method ensures that the provided tool is a valid `CrewAITool`, sanitizes
     the tool's name, processes its description, and prepares a function to interact
-    with the tool's arguments. It then returns a standardized `Tool` object.
+    with the tool's arguments. It then returns a standardized `Tool` object.<br/>
 
 <b>Parameters:</b>
 | Name | Description |
 |--|--|
-| `tool` | The tool to convert, expected to be an instance of `CrewAITool`.<br/><br/>**Type:** `Any` |
-| `**kwargs` | Additional arguments, which are not supported by this method.<br/><br/>**Type:** `Any` |
+| `cls` |  |
+| `tool` | The tool to convert, expected to be an instance of `CrewAITool`.<br/><br/>**Type:** Any |
+| `**kwargs` | Additional arguments, which are not supported by this method.<br/><br/>**Type:** Any |
 
 <b>Returns:</b>
 | Type | Description |
 |--|--|
-| `autogen.tools.tool.Tool` | Tool: A standardized `Tool` object converted from the CrewAI tool. |
+| [Tool](/docs/api-reference/autogen/tools/Tool) | Tool: A standardized `Tool` object converted from the CrewAI tool. |
 
 <br />
 

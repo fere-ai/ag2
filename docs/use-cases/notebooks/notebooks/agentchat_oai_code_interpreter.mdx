@@ -23,7 +23,7 @@ calling. In this notebook, we demonstrate how to enable
 
 ## Requirements
 
-AutoGen requires `Python>=3.9`. To run this notebook example, please
+AG2 requires `Python>=3.9`. To run this notebook example, please
 install:
 
 
@@ -89,7 +89,7 @@ math problems.
 ```python
 # Initiate an agent equipped with code interpreter
 gpt_assistant = GPTAssistantAgent(
-    name="Coder Assistant",
+    name="CoderAssistant",
     llm_config={
         "config_list": config_list,
     },
@@ -123,7 +123,7 @@ In this example, we demonstrate how to draw figures and download it.
 
 ```python
 gpt_assistant = GPTAssistantAgent(
-    name="Coder Assistant",
+    name="CoderAssistant",
     llm_config={
         "config_list": config_list,
     },

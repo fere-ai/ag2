@@ -1,7 +1,6 @@
 ---
 title: Tools with ChatContext Dependency Injection
-authors:
-  - rjambrecic
+authors: [rjambrecic]
 tags: [tools, tool calling, dependency injection]
 ---
 
@@ -48,17 +47,17 @@ By using [`ChatContext`](/docs/api-reference/autogen/tools/ChatContext#chatconte
 To install `AG2`, simply run the following command:
 
 ```bash
-pip install ag2
+pip install -U ag2[openai]
 ```
 
 <Tip>
 If you have been using `autogen` or `pyautogen`, all you need to do is upgrade it using:
 ```bash
-pip install -U autogen
+pip install -U autogen[openai]
 ```
 or
 ```bash
-pip install -U pyautogen
+pip install -U pyautogen[openai]
 ```
 as `pyautogen`, `autogen`, and `ag2` are aliases for the same PyPI package.
 </Tip>
@@ -127,7 +126,7 @@ Configure the agents for the interaction.
     settings.
 
 ```python
-config_list = [{"model": "gpt-4o-mini", "api_key": os.environ["OPENAI_API_KEY"]}]
+config_list = [{"api_type": "openai", "model": "gpt-4o-mini", "api_key": os.environ["OPENAI_API_KEY"]}]
 agent = AssistantAgent(
     name="agent",
     llm_config={"config_list": config_list},
@@ -287,6 +286,6 @@ In this post, we introduced [`ChatContext`](/docs/api-reference/autogen/tools/Ch
 
 By leveraging tools like [`ChatContext`](/docs/api-reference/autogen/tools/ChatContext#chatcontext) and employing dependency injection principles, you can build robust, secure, and user-friendly conversational workflows.
 <div className="edit-url-container">
-    <a className="edit-url" href="https://github.com/ag2ai/ag2/edit/main/website/_blogs/2025-01-22-Tools-ChatContext-Dependency-Injection/index.mdx" target='_blank'><Icon icon="pen" iconType="solid" size="13px"/> Edit this page</a>
+    <a className="edit-url" href="https://github.com/ag2ai/ag2/edit/main/website/docs/_blogs/2025-01-22-Tools-ChatContext-Dependency-Injection/index.mdx" target='_blank'><Icon icon="pen" iconType="solid" size="13px"/> Edit this page</a>
 </div>
 

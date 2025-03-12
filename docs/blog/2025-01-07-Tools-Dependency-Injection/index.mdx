@@ -1,7 +1,6 @@
 ---
 title: Tools Dependency Injection
-authors:
-  - rjambrecic
+authors: [rjambrecic]
 tags: [tools, tool calling, dependency injection]
 ---
 
@@ -53,17 +52,17 @@ In this guide, we’ll explore how to set up dependency injection and build secu
 To install `AG2`, simply run the following command:
 
 ```bash
-pip install ag2
+pip install -U ag2[openai]
 ```
 
 <Tip>
 If you have been using `autogen` or `pyautogen`, all you need to do is upgrade it using:
 ```bash
-pip install -U autogen
+pip install -U autogen[openai]
 ```
 or
 ```bash
-pip install -U pyautogen
+pip install -U pyautogen[openai]
 ```
 as `pyautogen`, `autogen`, and `ag2` are aliases for the same PyPI package.
 </Tip>
@@ -133,7 +132,7 @@ Configure the agents for the interaction.
 
 
 ```python
-config_list = [{"model": "gpt-4o-mini", "api_key": os.environ["OPENAI_API_KEY"]}]
+config_list = [{"api_type": "openai", "model": "gpt-4o-mini", "api_key": os.environ["OPENAI_API_KEY"]}]
 assistant = ConversableAgent(
     name="assistant",
     llm_config={"config_list": config_list},
@@ -216,7 +215,7 @@ Configure the agents for the interaction.
 - [`AssistantAgent`](/docs/api-reference/autogen/AssistantAgent) represents the AI agent, configured with the LLM settings.
 
 ```python
-config_list = [{"model": "gpt-4o-mini", "api_key": os.environ["OPENAI_API_KEY"]}]
+config_list = [{"api_type": "openai", "model": "gpt-4o-mini", "api_key": os.environ["OPENAI_API_KEY"]}]
 assistant = ConversableAgent(
     name="assistant",
     llm_config={"config_list": config_list},
@@ -303,7 +302,7 @@ You can assign different contexts, such as distinct account data, to different a
 Let's configure a `GroupChat` with two assistant agents.
 
 ```python
-config_list = [{"model": "gpt-4o-mini", "api_key": os.environ["OPENAI_API_KEY"]}]
+config_list = [{"api_type": "openai", "model": "gpt-4o-mini", "api_key": os.environ["OPENAI_API_KEY"]}]
 llm_config = {"config_list": config_list}
 assistant_1 = ConversableAgent(
     name="assistant_1",
@@ -421,6 +420,6 @@ The post provides a comprehensive guide on setting up and using DI with agents, 
 
 By following this guide, developers can create secure and flexible workflows that prevent unauthorized access to sensitive data while leveraging LLMs' full potential.
 <div className="edit-url-container">
-    <a className="edit-url" href="https://github.com/ag2ai/ag2/edit/main/website/_blogs/2025-01-07-Tools-Dependency-Injection/index.mdx" target='_blank'><Icon icon="pen" iconType="solid" size="13px"/> Edit this page</a>
+    <a className="edit-url" href="https://github.com/ag2ai/ag2/edit/main/website/docs/_blogs/2025-01-07-Tools-Dependency-Injection/index.mdx" target='_blank'><Icon icon="pen" iconType="solid" size="13px"/> Edit this page</a>
 </div>
 

@@ -12,9 +12,7 @@ LangChainInteroperability()
 ```
 
     A class implementing the `Interoperable` protocol for converting Langchain tools
-    into a general `Tool` format.
-    
-    This class takes a `LangchainTool` and converts it into a standard `Tool` object,
+    into a general `Tool` format.<br/>This class takes a `LangchainTool` and converts it into a standard `Tool` object,
     ensuring compatibility between Langchain tools and other systems that expect
     the `Tool` format.
 
@@ -24,25 +22,28 @@ LangChainInteroperability()
 #### convert_tool
 
 ```python
-convert_tool(tool: Any, **kwargs: Any) -> autogen.tools.tool.Tool
+convert_tool(
+    cls,
+    tool: Any,
+    **kwargs: Any
+) -> Tool
 ```
 
-    Converts a given Langchain tool into a general `Tool` format.
-    
-    This method verifies that the provided tool is a valid `LangchainTool`,
+    Converts a given Langchain tool into a general `Tool` format.<br/>This method verifies that the provided tool is a valid `LangchainTool`,
     processes the tool's input and description, and returns a standardized
-    `Tool` object.
+    `Tool` object.<br/>
 
 <b>Parameters:</b>
 | Name | Description |
 |--|--|
-| `tool` | The tool to convert, expected to be an instance of `LangchainTool`.<br/><br/>**Type:** `Any` |
-| `**kwargs` | Additional arguments, which are not supported by this method.<br/><br/>**Type:** `Any` |
+| `cls` |  |
+| `tool` | The tool to convert, expected to be an instance of `LangchainTool`.<br/><br/>**Type:** Any |
+| `**kwargs` | Additional arguments, which are not supported by this method.<br/><br/>**Type:** Any |
 
 <b>Returns:</b>
 | Type | Description |
 |--|--|
-| `autogen.tools.tool.Tool` | Tool: A standardized `Tool` object converted from the Langchain tool. |
+| [Tool](/docs/api-reference/autogen/tools/Tool) | Tool: A standardized `Tool` object converted from the Langchain tool. |
 
 <br />
 
