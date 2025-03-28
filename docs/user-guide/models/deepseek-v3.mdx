@@ -87,26 +87,24 @@ We'll use DeepSeek-V3 in our example.
 
 ```python
 import os
-
-config_list = [
-    {
-        "model": "deepseek-chat",
-        "base_url": "https://api.deepseek.com/v1",
-        "api_key": os.environ.get("DEEPSEEK_API_KEY"),
-        "api_type": "deepseek",
-        "tags": ["deepseek"],
-    }
-]
-
 from pathlib import Path
 
-from autogen import AssistantAgent, UserProxyAgent
+from autogen import AssistantAgent, UserProxyAgent, LLMConfig
 from autogen.coding import LocalCommandLineCodeExecutor
 
 # Setting up the code executor
 workdir = Path("coding")
 workdir.mkdir(exist_ok=True)
 code_executor = LocalCommandLineCodeExecutor(work_dir=workdir)
+
+# Setting up the configuration for DeepSeek-V3
+llm_config = LLMConfig(
+    model="deepseek-chat",
+    base_url="https://api.deepseek.com/v1",
+    api_key=os.environ.get("DEEPSEEK_API_KEY"),
+    api_type="deepseek",
+    tags=["deepseek"],
+)
 
 # Setting up the agents
 
@@ -128,11 +126,11 @@ When you find an answer, verify the answer carefully. Include verifiable evidenc
 IMPORTANT: Wait for the user to execute your code and then you can reply with the word "FINISH". DO NOT OUTPUT "FINISH" after your code block."""
 
 # The AssistantAgent, using DeepSeek-V3 model, will take the coding request and return code
-assistant_agent = AssistantAgent(
-    name="DeepSeek_Assistant",
-    system_message=system_message,
-    llm_config={"config_list": config_list},
-)
+with llm_config:
+    assistant_agent = AssistantAgent(
+        name="DeepSeek_Assistant",
+        system_message=system_message,
+    )
 
 # Start the chat, with the UserProxyAgent asking the AssistantAgent the message
 chat_result = user_proxy_agent.initiate_chat(
@@ -192,7 +190,6 @@ User (to DeepSeek_Assistant):
 exitcode: 0 (execution succeeded)
 Code output: Number of prime numbers from 1 to 10000: 1229
 
-
 --------------------------------------------------------------------------------
 DeepSeek_Assistant (to User):
 
@@ -224,24 +221,22 @@ from typing_extensions import Annotated
 
 import autogen
 
-config_list = [
-    {
-        "model": "deepseek-chat",
-        "base_url": "https://api.deepseek.com/v1",
-        "api_key": os.environ.get("DEEPSEEK_API_KEY"),
-        "api_type": "deepseek",
-        "tags": ["deepseek"],
-    }
-]
+llm_config = autogen.LLMConfig(
+    model="deepseek-chat",
+    base_url="https://api.deepseek.com/v1",
+    api_key=os.environ.get("DEEPSEEK_API_KEY"),
+    api_type="deepseek",
+    tags=["deepseek"],
+)
 
 # Create the agent for tool calling
-chatbot = autogen.AssistantAgent(
-    name="chatbot",
-    system_message="""For currency exchange and weather forecasting tasks,
-        only use the functions you have been provided with.
-        Output 'HAVE FUN!' when an answer has been provided.""",
-    llm_config={"config_list": config_list},
-)
+with llm_config:
+    chatbot = autogen.AssistantAgent(
+        name="chatbot",
+        system_message="""For currency exchange and weather forecasting tasks,
+            only use the functions you have been provided with.
+            Output 'HAVE FUN!' when an answer has been provided.""",
+    )
 
 # Note that we have changed the termination string to be "HAVE FUN!"
 user_proxy = autogen.UserProxyAgent(
@@ -260,7 +255,6 @@ CurrencySymbol = Literal["USD", "EUR"]
 
 # Define our function that we expect to call
 
-
 def exchange_rate(base_currency: CurrencySymbol, quote_currency: CurrencySymbol) -> float:
     if base_currency == quote_currency:
         return 1.0
@@ -271,9 +265,7 @@ def exchange_rate(base_currency: CurrencySymbol, quote_currency: CurrencySymbol)
     else:
         raise ValueError(f"Unknown currencies {base_currency}, {quote_currency}")
 
-
 # Register the function with the agent
-
 
 @user_proxy.register_for_execution()
 @chatbot.register_for_llm(description="Currency exchange calculator.")
@@ -285,9 +277,7 @@ def currency_calculator(
     quote_amount = exchange_rate(base_currency, quote_currency) * base_amount
     return f"{format(quote_amount, '.2f')} {quote_currency}"
 
-
 # Weather function
-
 
 # Example function to make available to model
 def get_current_weather(location, unit="fahrenheit"):
@@ -301,9 +291,7 @@ def get_current_weather(location, unit="fahrenheit"):
     else:
         return json.dumps({"location": location, "temperature": "unknown"})
 
-
 # Register the function with the agent
-
 
 @user_proxy.register_for_execution()
 @chatbot.register_for_llm(description="Weather forecast for US cities.")
@@ -328,7 +316,6 @@ What's the weather in New York and can you tell me how much is 123.45 EUR in USD
 
 --------------------------------------------------------------------------------
 chatbot (to user_proxy):
-
 
 ***** Suggested tool call (call_0_5c4b1925-5eec-4190-9887-fecf4dcc4c07): weather_forecast *****
 Arguments:
