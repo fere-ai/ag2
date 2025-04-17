@@ -190,3 +190,6 @@ local_cache
 notebook/result.png
 
 notebook/coding
+
+chroma
+notebook/reasoning_tree.json

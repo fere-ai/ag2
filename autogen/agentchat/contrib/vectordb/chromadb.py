@@ -5,7 +5,7 @@
 # Portions derived from  https://github.com/microsoft/autogen are under the MIT License.
 # SPDX-License-Identifier: MIT
 import os
-from typing import Callable
+from typing import Any, Callable
 
 from ....import_utils import optional_import_block, require_optional_import
 from .base import Document, ItemID, QueryResults, VectorDB
@@ -130,7 +130,7 @@ class ChromaVectorDB(VectorDB):
         else:
             if not (self.active_collection and self.active_collection.name == collection_name):
                 self.active_collection = self.client.get_collection(
-                    collection_name, embedding_function=self.embedding_function
+                    name=collection_name, embedding_function=self.embedding_function
                 )
         return self.active_collection
 
@@ -227,7 +227,7 @@ class ChromaVectorDB(VectorDB):
         collection_name: str = None,
         n_results: int = 10,
         distance_threshold: float = -1,
-        **kwargs,
+        **kwargs: Any,
     ) -> QueryResults:
         """Retrieve documents from the collection of the vector database based on the queries.
 

@@ -76,15 +76,14 @@ import os
 import re
 import time
 import warnings
-from typing import Any, Optional, Type
+from typing import Any, Literal, Optional, Union
 
-from openai.types.chat import ChatCompletion, ChatCompletionMessageToolCall
-from openai.types.chat.chat_completion import ChatCompletionMessage, Choice
-from openai.types.completion_usage import CompletionUsage
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 
 from ..import_utils import optional_import_block, require_optional_import
+from ..llm_config import LLMConfigEntry, register_llm_config
 from .client_utils import FormatterProtocol, validate_parameter
+from .oai_models import ChatCompletion, ChatCompletionMessage, ChatCompletionMessageToolCall, Choice, CompletionUsage
 
 with optional_import_block():
     from anthropic import Anthropic, AnthropicBedrock, AnthropicVertex
@@ -109,13 +108,32 @@ ANTHROPIC_PRICING_1k = {
 }
 
 
+@register_llm_config
+class AnthropicLLMConfigEntry(LLMConfigEntry):
+    api_type: Literal["anthropic"] = "anthropic"
+    temperature: float = Field(default=1.0, ge=0.0, le=1.0)
+    top_k: Optional[int] = Field(default=None, ge=1)
+    top_p: Optional[float] = Field(default=None, ge=0.0, le=1.0)
+    stop_sequences: Optional[list[str]] = None
+    stream: bool = False
+    max_tokens: int = Field(default=4096, ge=1)
+    tool_choice: Optional[dict] = None
+
+    gcp_project_id: Optional[str] = None
+    gcp_region: Optional[str] = None
+    gcp_auth_token: Optional[str] = None
+
+    def create_client(self):
+        raise NotImplementedError("AnthropicLLMConfigEntry.create_client is not implemented.")
+
+
 @require_optional_import("anthropic", "anthropic")
 class AnthropicClient:
     def __init__(self, **kwargs: Any):
         """Initialize the Anthropic API client.
 
         Args:
-            api_key (str): The API key for the Anthropic API or set the `ANTHROPIC_API_KEY` environment variable.
+            **kwargs: The configuration parameters for the client.
         """
         self._api_key = kwargs.get("api_key")
         self._aws_access_key = kwargs.get("aws_access_key")
@@ -170,7 +188,7 @@ class AnthropicClient:
         self._last_tooluse_status = {}
 
         # Store the response format, if provided (for structured outputs)
-        self._response_format: Optional[Type[BaseModel]] = None
+        self._response_format: Optional[type[BaseModel]] = None
 
     def load_config(self, params: dict[str, Any]):
         """Load the configuration for the Anthropic API client."""
@@ -194,6 +212,11 @@ class AnthropicClient:
                 UserWarning,
             )
             anthropic_params["stream"] = False
+
+        # Note the Anthropic API supports "tool" for tool_choice but you must specify the tool name so we will ignore that here
+        # Dictionary, see options here: https://docs.anthropic.com/en/docs/build-with-claude/tool-use/overview#controlling-claudes-output
+        # type = auto, any, tool, none | name = the name of the tool if type=tool
+        anthropic_params["tool_choice"] = validate_parameter(params, "tool_choice", dict, True, None, None, None)
 
         return anthropic_params
 
@@ -271,6 +294,8 @@ class AnthropicClient:
             del anthropic_params["top_p"]
         if anthropic_params["stop_sequences"] is None:
             del anthropic_params["stop_sequences"]
+        if anthropic_params["tool_choice"] is None:
+            del anthropic_params["tool_choice"]
 
         response = self._client.messages.create(**anthropic_params)
 
@@ -365,11 +390,42 @@ class AnthropicClient:
 
     @staticmethod
     def convert_tools_to_functions(tools: list) -> list:
+        """
+        Convert tool definitions into Anthropic-compatible functions,
+        updating nested $ref paths in property schemas.
+
+        Args:
+            tools (list): List of tool definitions.
+
+        Returns:
+            list: List of functions with updated $ref paths.
+        """
+
+        def update_refs(obj, defs_keys, prop_name):
+            """Recursively update $ref values that start with "#/$defs/"."""
+            if isinstance(obj, dict):
+                for key, value in obj.items():
+                    if key == "$ref" and isinstance(value, str) and value.startswith("#/$defs/"):
+                        ref_key = value[len("#/$defs/") :]
+                        if ref_key in defs_keys:
+                            obj[key] = f"#/properties/{prop_name}/$defs/{ref_key}"
+                    else:
+                        update_refs(value, defs_keys, prop_name)
+            elif isinstance(obj, list):
+                for item in obj:
+                    update_refs(item, defs_keys, prop_name)
+
         functions = []
         for tool in tools:
             if tool.get("type") == "function" and "function" in tool:
-                functions.append(tool["function"])
-
+                function = tool["function"]
+                parameters = function.get("parameters", {})
+                properties = parameters.get("properties", {})
+                for prop_name, prop_schema in properties.items():
+                    if "$defs" in prop_schema:
+                        defs_keys = set(prop_schema["$defs"].keys())
+                        update_refs(prop_schema, defs_keys, prop_name)
+                functions.append(function)
         return functions
 
     def _add_response_format_to_system(self, params: dict[str, Any]):
@@ -384,7 +440,10 @@ class AnthropicClient:
             return
 
         # Get the schema of the Pydantic model
-        schema = self._response_format.model_json_schema()
+        if isinstance(self._response_format, dict):
+            schema = self._response_format
+        else:
+            schema = self._response_format.model_json_schema()
 
         # Add instructions for JSON formatting
         format_content = f"""Please provide your response as a JSON object that matches the following schema:
@@ -425,16 +484,79 @@ Ensure the JSON is properly formatted and matches the schema exactly."""
             json_str = content[json_start : json_end + 1]
 
         try:
-            # Parse JSON and validate against the Pydantic model
+            # Parse JSON and validate against the Pydantic model if Pydantic model was provided
             json_data = json.loads(json_str)
-            return self._response_format.model_validate(json_data)
+            if isinstance(self._response_format, dict):
+                return json_str
+            else:
+                return self._response_format.model_validate(json_data)
+
         except Exception as e:
             raise ValueError(f"Failed to parse response as valid JSON matching the schema for Structured Output: {e!s}")
 
 
 def _format_json_response(response: Any) -> str:
     """Formats the JSON response for structured outputs using the format method if it exists."""
-    return response.format() if isinstance(response, FormatterProtocol) else response
+    if isinstance(response, str):
+        return response
+    elif isinstance(response, FormatterProtocol):
+        return response.format()
+    else:
+        return response.model_dump_json()
+
+
+def process_image_content(content_item: dict[str, Any]) -> dict[str, Any]:
+    """Process an OpenAI image content item into Claude format."""
+    if content_item["type"] != "image_url":
+        return content_item
+
+    url = content_item["image_url"]["url"]
+    try:
+        # Handle data URLs
+        if url.startswith("data:"):
+            data_url_pattern = r"data:image/([a-zA-Z]+);base64,(.+)"
+            match = re.match(data_url_pattern, url)
+            if match:
+                media_type, base64_data = match.groups()
+                return {
+                    "type": "image",
+                    "source": {"type": "base64", "media_type": f"image/{media_type}", "data": base64_data},
+                }
+
+        else:
+            print("Error processing image.")
+            # Return original content if image processing fails
+            return content_item
+
+    except Exception as e:
+        print(f"Error processing image image: {e}")
+        # Return original content if image processing fails
+        return content_item
+
+
+def process_message_content(message: dict[str, Any]) -> Union[str, list[dict[str, Any]]]:
+    """Process message content, handling both string and list formats with images."""
+    content = message.get("content", "")
+
+    # Handle empty content
+    if content == "":
+        return content
+
+    # If content is already a string, return as is
+    if isinstance(content, str):
+        return content
+
+    # Handle list content (mixed text and images)
+    if isinstance(content, list):
+        processed_content = []
+        for item in content:
+            if item["type"] == "text":
+                processed_content.append({"type": "text", "text": item["text"]})
+            elif item["type"] == "image_url":
+                processed_content.append(process_image_content(item))
+        return processed_content
+
+    return content
 
 
 @require_optional_import("anthropic", "anthropic")
@@ -460,7 +582,13 @@ def oai_messages_to_anthropic_messages(params: dict[str, Any]) -> list[dict[str,
     last_tool_result_index = -1
     for message in params["messages"]:
         if message["role"] == "system":
-            params["system"] = params.get("system", "") + ("\n" if "system" in params else "") + message["content"]
+            content = process_message_content(message)
+            if isinstance(content, list):
+                # For system messages with images, concatenate only the text portions
+                text_content = " ".join(item.get("text", "") for item in content if item.get("type") == "text")
+                params["system"] = params.get("system", "") + (" " if "system" in params else "") + text_content
+            else:
+                params["system"] = params.get("system", "") + ("\n" if "system" in params else "") + content
         else:
             # New messages will be added here, manage role alternations
             expected_role = "user" if len(processed_messages) % 2 == 0 else "assistant"
@@ -532,8 +660,11 @@ def oai_messages_to_anthropic_messages(params: dict[str, Any]) -> list[dict[str,
                     processed_messages.append(
                         user_continue_message if expected_role == "user" else assistant_continue_message
                     )
-
-                processed_messages.append(message)
+                # Process messages for images
+                processed_content = process_message_content(message)
+                processed_message = message.copy()
+                processed_message["content"] = processed_content
+                processed_messages.append(processed_message)
 
     # We'll replace the last tool_use if there's no tool_result (occurs if we finish the conversation before running the function)
     if has_tools and tool_use_messages != tool_result_messages:

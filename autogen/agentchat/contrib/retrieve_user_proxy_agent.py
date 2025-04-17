@@ -99,9 +99,9 @@ class RetrieveUserProxyAgent(UserProxyAgent):
         self,
         name="RetrieveChatAgent",  # default set to RetrieveChatAgent
         human_input_mode: Literal["ALWAYS", "NEVER", "TERMINATE"] = "ALWAYS",
-        is_termination_msg: Optional[Callable[[dict], bool]] = None,
-        retrieve_config: Optional[dict] = None,  # config for the retrieve agent
-        **kwargs,
+        is_termination_msg: Optional[Callable[[dict[str, Any]], bool]] = None,
+        retrieve_config: Optional[dict[str, Any]] = None,  # config for the retrieve agent
+        **kwargs: Any,
     ):
         r"""Args:
             name (str): name of the agent.
@@ -174,7 +174,7 @@ class RetrieveUserProxyAgent(UserProxyAgent):
                     If chunk_mode is "one_line", this parameter will be ignored.
                 - `embedding_model` (Optional, str) - the embedding model to use for the retrieve chat.
                     If key not provided, a default model `all-MiniLM-L6-v2` will be used. All available
-                    models can be found at `https://www.sbert.net/docs/pretrained_models.html`.
+                    models can be found at `https://www.sbert.net/docs/sentence_transformer/pretrained_models.html`.
                     The default model is a fast model. If you want to use a high performance model,
                     `all-mpnet-base-v2` is recommended.
                     *[Deprecated]* no need when use `vector_db` instead of `client`.
@@ -192,7 +192,7 @@ class RetrieveUserProxyAgent(UserProxyAgent):
                 - `update_context` (Optional, bool) - if False, will not apply `Update Context` for
                     interactive retrieval. Default is True.
                 - `collection_name` (Optional, str) - the name of the collection.
-                    If key not provided, a default name `autogen-docs` will be used.
+                    If key not provided, a default name `ag2-docs` will be used.
                 - `get_or_create` (Optional, bool) - Whether to get the collection if it exists. Default is False.
                 - `overwrite` (Optional, bool) - Whether to overwrite the collection if it exists. Default is False.
                     Case 1. if the collection does not exist, create the collection.
@@ -231,7 +231,7 @@ class RetrieveUserProxyAgent(UserProxyAgent):
                 query_texts: List[str],
                 n_results: int = 10,
                 search_string: str = "",
-                **kwargs,
+                **kwargs: Any,
             ) -> Dict[str, Union[List[str], List[List[str]]]]:
                 # define your own query function here
                 pass
@@ -241,7 +241,7 @@ class RetrieveUserProxyAgent(UserProxyAgent):
                     query_texts=[problem],
                     n_results=n_results,
                     search_string=search_string,
-                    **kwargs,
+                    **kwargs: Any,
                 )
 
                 self._results = results
@@ -261,7 +261,7 @@ class RetrieveUserProxyAgent(UserProxyAgent):
         self._docs_path = self._retrieve_config.get("docs_path", None)
         self._extra_docs = self._retrieve_config.get("extra_docs", False)
         self._new_docs = self._retrieve_config.get("new_docs", True)
-        self._collection_name = self._retrieve_config.get("collection_name", "autogen-docs")
+        self._collection_name = self._retrieve_config.get("collection_name", "ag2-docs")
         if "docs_path" not in self._retrieve_config:
             logger.warning(
                 "docs_path is not provided in retrieve_config. "
@@ -520,10 +520,10 @@ class RetrieveUserProxyAgent(UserProxyAgent):
 
     def _generate_retrieve_user_reply(
         self,
-        messages: Optional[list[dict]] = None,
+        messages: Optional[list[dict[str, Any]]] = None,
         sender: Optional[Agent] = None,
         config: Optional[Any] = None,
-    ) -> tuple[bool, Union[str, dict, None]]:
+    ) -> tuple[bool, Optional[Union[str, dict[str, Any]]]]:
         """In this function, we will update the context and reset the conversation based on different conditions.
         We'll update the context and reset the conversation if update_context is True and either of the following:
         (1) the last message contains "UPDATE CONTEXT",

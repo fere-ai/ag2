@@ -9,11 +9,15 @@
 import unittest
 from unittest.mock import MagicMock
 
+import pytest
+from pytest import MonkeyPatch
+
 import autogen
+from autogen.agentchat import GroupChat
 from autogen.agentchat.contrib.img_utils import get_pil_image
 from autogen.agentchat.contrib.multimodal_conversable_agent import MultimodalConversableAgent
 from autogen.agentchat.conversable_agent import ConversableAgent
-from autogen.import_utils import skip_on_missing_imports
+from autogen.import_utils import run_for_optional_imports
 
 from ...conftest import MOCK_OPEN_AI_API_KEY
 
@@ -23,58 +27,56 @@ base64_encoded_image = (
 )
 
 
-@skip_on_missing_imports(["PIL"], "unknown")
-class TestMultimodalConversableAgent(unittest.TestCase):
+@run_for_optional_imports(["PIL"], "unknown")
+@pytest.mark.lmm
+class TestMultimodalConversableAgent:
+    @pytest.fixture(autouse=True)
     def setUp(self):
         self.agent = MultimodalConversableAgent(
             name="TestAgent",
             llm_config={
                 "timeout": 600,
                 "seed": 42,
-                "config_list": [{"model": "gpt-4-vision-preview", "api_key": MOCK_OPEN_AI_API_KEY}],
+                "config_list": [
+                    {"api_type": "openai", "model": "gpt-4-vision-preview", "api_key": MOCK_OPEN_AI_API_KEY}
+                ],
             },
         )
 
     def test_system_message(self):
         # Test default system message
-        self.assertEqual(
-            self.agent.system_message,
-            [
-                {
-                    "type": "text",
-                    "text": "You are a helpful AI assistant.",
-                }
-            ],
-        )
+        assert self.agent.system_message == [
+            {
+                "type": "text",
+                "text": "You are a helpful AI assistant.",
+            }
+        ]
 
         # Test updating system message
         new_message = f"We will discuss <img {base64_encoded_image}> in this conversation."
         self.agent.update_system_message(new_message)
 
         pil_image = get_pil_image(base64_encoded_image)
-        self.assertEqual(
-            self.agent.system_message,
-            [
-                {"type": "text", "text": "We will discuss "},
-                {"type": "image_url", "image_url": {"url": pil_image}},
-                {"type": "text", "text": " in this conversation."},
-            ],
-        )
+        assert self.agent.system_message == [
+            {"type": "text", "text": "We will discuss "},
+            {"type": "image_url", "image_url": {"url": pil_image}},
+            {"type": "text", "text": " in this conversation."},
+        ]
 
     def test_message_to_dict(self):
         # Test string message
         message_str = "Hello"
         expected_dict = {"content": [{"type": "text", "text": "Hello"}]}
-        self.assertDictEqual(self.agent._message_to_dict(message_str), expected_dict)
+        assert self.agent._message_to_dict(message_str) == expected_dict
 
         # Test list message
         message_list = [{"type": "text", "text": "Hello"}]
         expected_dict = {"content": message_list}
-        self.assertDictEqual(self.agent._message_to_dict(message_list), expected_dict)
+        assert self.agent._message_to_dict(message_list) == expected_dict
 
         # Test dictionary message
         message_dict = {"content": [{"type": "text", "text": "Hello"}]}
-        self.assertDictEqual(self.agent._message_to_dict(message_dict), message_dict)
+        assert self.agent._message_to_dict(message_dict) == message_dict
 
     def test_print_received_message(self):
         sender = ConversableAgent(name="SenderAgent", llm_config=False, code_execution_config=False)
@@ -84,8 +86,9 @@ class TestMultimodalConversableAgent(unittest.TestCase):
         self.agent._print_received_message.assert_called_with(message_str, sender)
 
 
-@skip_on_missing_imports(["PIL"], "unknown")
-def test_group_chat_with_lmm():
+@run_for_optional_imports(["PIL"], "unknown")
+@pytest.mark.lmm
+def test_group_chat_with_lmm(monkeypatch: MonkeyPatch):
     """Tests the group chat functionality with two MultimodalConversable Agents.
     Verifies that the chat is correctly limited by the max_round parameter.
     Each agent is set to describe an image in a unique style, but the chat should not exceed the specified max_rounds.
@@ -118,9 +121,12 @@ def test_group_chat_with_lmm():
         code_execution_config=False,
     )
 
+    # Mock speaker selection so it doesn't require a GroupChatManager with an LLM
+    monkeypatch.setattr(GroupChat, "_auto_select_speaker", lambda *args, **kwargs: agent1)
+
     # Setting up the group chat
     groupchat = autogen.GroupChat(agents=[agent1, agent2, user_proxy], messages=[], max_round=max_round)
-    group_chat_manager = autogen.GroupChatManager(groupchat=groupchat, llm_config=llm_config)
+    group_chat_manager = autogen.GroupChatManager(groupchat=groupchat, llm_config=None)
 
     # Initiating the group chat and observing the number of rounds
     user_proxy.initiate_chat(group_chat_manager, message=f"What do you see? <img {base64_encoded_image}>")

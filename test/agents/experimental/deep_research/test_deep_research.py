@@ -7,13 +7,14 @@ from typing import Any
 import pytest
 
 from autogen.agents.experimental import DeepResearchAgent
-from autogen.import_utils import skip_on_missing_imports
+from autogen.import_utils import run_for_optional_imports
+from autogen.llm_config import LLMConfig
 from autogen.tools.experimental import DeepResearchTool
 
 from ....conftest import Credentials
 
 
-@skip_on_missing_imports(
+@run_for_optional_imports(
     ["langchain_openai", "browser_use"],
     "browser-use",
 )
@@ -40,15 +41,17 @@ class TestDeepResearchAgent:
                 "type": "function",
             }
         ]
+        assert isinstance(agent.llm_config, (dict, LLMConfig)), "llm_config should be a dictionary or LLMConfig"
         assert agent.llm_config["tools"] == expected_tools
 
     @pytest.mark.skip(reason="The test takes too long to run.")
-    @pytest.mark.openai
+    @run_for_optional_imports("openai", "openai")
     def test_end2end(self, credentials_gpt_4o: Credentials) -> None:
         def is_termination_msg(message: Any) -> bool:
-            return message.get("content", "") and message.get("content", "").startswith(
-                DeepResearchTool.ANSWER_CONFIRMED_PREFIX
-            )
+            content = message.get("content", "")
+            if not content:
+                return False
+            return bool(content.startswith(DeepResearchTool.ANSWER_CONFIRMED_PREFIX))
 
         agent = DeepResearchAgent(
             name="deep_research_agent",

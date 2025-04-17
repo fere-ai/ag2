@@ -8,26 +8,60 @@
 from unittest.mock import MagicMock
 
 import pytest
-from openai.types.chat.parsed_chat_completion import ChatCompletion, ChatCompletionMessage, Choice
 from pydantic import BaseModel, ValidationError
 
 import autogen
+from autogen.import_utils import optional_import_block
 
-from ..conftest import Credentials
+with optional_import_block() as result:
+    import openai  # noqa: F401
+    from openai.types.chat.parsed_chat_completion import ChatCompletion, ChatCompletionMessage, Choice
 
 
-@pytest.mark.openai
-def test_structured_output(credentials_gpt_4o: Credentials):
-    class ResponseModel(BaseModel):
-        question: str
-        short_answer: str
-        reasoning: str
-        difficulty: float
+from ..conftest import (
+    Credentials,
+    credentials_gemini_flash,
+    credentials_gpt_4o_mini,
+    suppress_gemini_resource_exhausted,
+)
 
-    config_list = credentials_gpt_4o.config_list
+credentials_structured_output = [
+    pytest.param(
+        credentials_gpt_4o_mini.__name__,
+        marks=[pytest.mark.openai, pytest.mark.aux_neg_flag],
+    ),
+    pytest.param(
+        credentials_gemini_flash.__name__,
+        marks=[pytest.mark.gemini, pytest.mark.aux_neg_flag],
+    ),
+]
+
+
+class ResponseModel(BaseModel):
+    question: str
+    short_answer: str
+    reasoning: str
+    difficulty: float
+
+
+@pytest.mark.parametrize(
+    "credentials_from_test_param",
+    credentials_structured_output,
+    indirect=True,
+)
+@pytest.mark.parametrize(
+    "response_format",
+    [
+        ResponseModel,
+        ResponseModel.model_json_schema(),
+    ],
+)
+@suppress_gemini_resource_exhausted
+def test_structured_output(credentials_from_test_param, response_format):
+    config_list = credentials_from_test_param.config_list
 
     for config in config_list:
-        config["response_format"] = ResponseModel
+        config["response_format"] = response_format
 
     llm_config = {"config_list": config_list, "cache_seed": 43}
 
@@ -55,20 +89,20 @@ def test_structured_output(credentials_gpt_4o: Credentials):
         raise AssertionError(f"Agent did not return a structured report. Exception: {e}")
 
 
-@pytest.mark.openai
-def test_global_structured_output(credentials_gpt_4o: Credentials):
-    class ResponseModel(BaseModel):
-        question: str
-        short_answer: str
-        reasoning: str
-        difficulty: float
-
-    config_list = credentials_gpt_4o.config_list
+@pytest.mark.parametrize(
+    "credentials_from_test_param",
+    credentials_structured_output,
+    indirect=True,
+)
+@pytest.mark.parametrize("response_format", [ResponseModel, ResponseModel.model_json_schema()])
+@suppress_gemini_resource_exhausted
+def test_structured_output_global(credentials_from_test_param, response_format):
+    config_list = credentials_from_test_param.config_list
 
     llm_config = {
         "config_list": config_list,
         "cache_seed": 43,
-        "response_format": ResponseModel,
+        "response_format": response_format,
     }
 
     user_proxy = autogen.UserProxyAgent(

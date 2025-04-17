@@ -6,13 +6,14 @@
 # SPDX-License-Identifier: MIT
 import json
 import logging
-from typing import Optional
+from typing import Any, Optional, Union
 
 import requests
 
 from ...code_utils import content_str
 from ...formatting_utils import colored
 from ...import_utils import optional_import_block, require_optional_import
+from ...llm_config import LLMConfig
 from ..agent import Agent
 from .img_utils import get_image_data, llava_formatter
 from .multimodal_conversable_agent import MultimodalConversableAgent
@@ -34,7 +35,7 @@ class LLaVAAgent(MultimodalConversableAgent):
         name: str,
         system_message: Optional[tuple[str, list]] = DEFAULT_LLAVA_SYS_MSG,
         *args,
-        **kwargs,
+        **kwargs: Any,
     ):
         """Args:
         name (str): agent name.
@@ -99,7 +100,12 @@ class LLaVAAgent(MultimodalConversableAgent):
 
 @require_optional_import("replicate", "lmm")
 def _llava_call_binary_with_config(
-    prompt: str, images: list, config: dict, max_new_tokens: int = 1000, temperature: float = 0.5, seed: int = 1
+    prompt: str,
+    images: list[Any],
+    config: dict[str, Any],
+    max_new_tokens: int = 1000,
+    temperature: float = 0.5,
+    seed: int = 1,
 ):
     if config["base_url"].find("0.0.0.0") >= 0 or config["base_url"].find("localhost") >= 0:
         llava_mode = "local"
@@ -145,7 +151,12 @@ def _llava_call_binary_with_config(
 
 @require_optional_import("replicate", "lmm")
 def llava_call_binary(
-    prompt: str, images: list, config_list: list, max_new_tokens: int = 1000, temperature: float = 0.5, seed: int = 1
+    prompt: str,
+    images: list[Any],
+    config_list: list[dict[str, Any]],
+    max_new_tokens: int = 1000,
+    temperature: float = 0.5,
+    seed: int = 1,
 ):
     # TODO 1: add caching around the LLaVA call to save compute and cost
     # TODO 2: add `seed` to ensure reproducibility. The seed is not working now.
@@ -158,7 +169,7 @@ def llava_call_binary(
             continue
 
 
-def llava_call(prompt: str, llm_config: dict) -> str:
+def llava_call(prompt: str, llm_config: Union[LLMConfig, dict]) -> str:
     """Makes a call to the LLaVA service to generate text based on a given prompt"""
     prompt, images = llava_formatter(prompt, order_image_tokens=False)
 

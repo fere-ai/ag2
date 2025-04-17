@@ -2,14 +2,18 @@
 #
 # SPDX-License-Identifier: Apache-2.0
 
+import pytest
+
 from autogen.agents.experimental import SlackAgent
-from autogen.import_utils import skip_on_missing_imports
+from autogen.import_utils import run_for_optional_imports
+from autogen.llm_config import LLMConfig
 
 from .....conftest import Credentials
 
 
-@skip_on_missing_imports("slack_sdk", "commsagent-slack")
-class TestSlackSendTool:
+@run_for_optional_imports(["crewai_tools", "langchain", "pydantic_ai"], "commsagent-slack")
+@pytest.mark.commsagent_slack
+class TestSlackAgent:
     def test_init(self, mock_credentials: Credentials) -> None:
         slack_agent = SlackAgent(
             name="SlackAgent",
@@ -57,6 +61,7 @@ class TestSlackSendTool:
         ]
 
         assert set(tool.name for tool in slack_agent.tools) == {"slack_send", "slack_retrieve"}
+        assert isinstance(slack_agent.llm_config, (dict, LLMConfig)), "llm_config should be a dictionary or LLMConfig"
         assert slack_agent.llm_config["tools"] == expected_tools
         assert slack_agent.system_message == (
             "You are a helpful AI assistant that communicates through Slack. "

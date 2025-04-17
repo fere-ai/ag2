@@ -4,8 +4,22 @@
 
 from .deep_research import DeepResearchAgent
 from .discord import DiscordAgent
+from .document_agent import DocAgent, DoclingDocIngestAgent, InMemoryQueryEngine, VectorChromaQueryEngine
+from .reasoning import ReasoningAgent, ThinkNode
 from .slack import SlackAgent
 from .telegram import TelegramAgent
 from .websurfer import WebSurferAgent
 
-__all__ = ["DeepResearchAgent", "DiscordAgent", "SlackAgent", "TelegramAgent", "WebSurferAgent"]
+__all__ = [
+    "DeepResearchAgent",
+    "DiscordAgent",
+    "DocAgent",
+    "DoclingDocIngestAgent",
+    "InMemoryQueryEngine",
+    "ReasoningAgent",
+    "SlackAgent",
+    "TelegramAgent",
+    "ThinkNode",
+    "VectorChromaQueryEngine",
+    "WebSurferAgent",
+]

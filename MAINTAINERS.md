@@ -13,7 +13,7 @@
 | Yixuan Zhai     | [randombet](https://github.com/randombet)                  | Meta                   | group chat, sequential_chats, rag       |
 | Yiran Wu        | [yiranwu0](https://github.com/yiranwu0)                    | Penn State University  | alt-models, group chat, logging, infra  |
 | Jieyu Zhang     | [JieyuZ2](https://jieyuz2.github.io/)                  | University of Washington | autobuild, group chat       |
-| Davor Runje     | [davorrunje](https://github.com/davorrunje)                | airt.ai                | Tool calling, IO                        |
+| Davor Runje     | [davorrunje](https://github.com/davorrunje)                | airt.ai                | Tool calling, I/O                        |
 | Rudy Wu     | [rudyalways](https://github.com/rudyalways)                | Google                | all, group chats, sequential chats                |
 | Haiyang Li  | [ohdearquant](https://github.com/ohdearquant)               | -               | all, sequential chats, structured output, low-level|
 | Eric Moore  | [emooreatx](https://github.com/emooreatx)               | IBM               | all|
@@ -22,6 +22,7 @@
 | Jiacheng Shang  | [Eric-Shang](https://github.com/Eric-Shang)               | Toast              | RAG |
 | Alec Solder  | [alecsolder](https://github.com/alecsolder)               | -                | swarms, reasoning, function calling |
 | Marc Willhaus | [willhama](https://github.com/willhama)               | -                | - |
+| George Sideris | [giorgossideris](https://github.com/giorgossideris)               | -                | reasoning, RAG |
 
 **Pending Maintainers list (Marked with \*, Waiting for explicit approval from the maintainers)**
 | Name            | GitHub Handle                                              | Organization           | Features                                |

@@ -12,7 +12,6 @@ from typing import Optional, Union
 import pytest
 
 from autogen._website.process_notebooks import (
-    NavigationGroup,
     add_authors_and_social_img_to_blog_and_user_stories,
     add_front_matter_to_metadata_mdx,
     cleanup_tmp_dirs,
@@ -26,6 +25,8 @@ from autogen._website.process_notebooks import (
     get_sorted_files,
     update_group_pages,
 )
+from autogen._website.utils import NavigationGroup
+from autogen.import_utils import run_for_optional_imports
 
 
 class TestUpdateGroupPages:
@@ -40,12 +41,6 @@ class TestUpdateGroupPages:
                         "group": "Use cases",
                         "pages": [
                             "docs/use-cases/use-cases/customer-service",
-                        ],
-                    },
-                    {
-                        "group": "Reference Agents",
-                        "pages": [
-                            "docs/use-cases/reference-agents/index",
                         ],
                     },
                     {"group": "Notebooks", "pages": ["docs/use-cases/notebooks/notebooks"]},
@@ -91,12 +86,6 @@ class TestUpdateGroupPages:
                         "group": "Use cases",
                         "pages": [
                             "docs/use-cases/use-cases/customer-service",
-                        ],
-                    },
-                    {
-                        "group": "Reference Agents",
-                        "pages": [
-                            "docs/use-cases/reference-agents/index",
                         ],
                     },
                     {"group": "Notebooks", "pages": ["docs/use-cases/updated-notebook/index"]},
@@ -385,40 +374,39 @@ class TestAddBlogsToNavigation:
             assert actual == expected, actual
 
 
-class TestUpdateNavigation:
-    def setup(self, temp_dir: Path) -> None:
-        """Set up test files in the temporary directory."""
-        # Create directories
-        snippets_dir = temp_dir / "snippets" / "data"
-        snippets_dir.mkdir(parents=True, exist_ok=True)
+def setup_test_files(tmp_path: Path) -> None:
+    """Set up test files in the temporary directory."""
+    # Create directories
+    snippets_dir = tmp_path / "snippets" / "data"
+    snippets_dir.mkdir(parents=True, exist_ok=True)
 
-        # Create mint.json content
-        mint_json_content = {
-            "name": "AG2",
-            "logo": {"dark": "/logo/ag2-white.svg", "light": "/logo/ag2.svg"},
-            "navigation": [
-                {"group": "", "pages": ["docs/Home", "docs/Getting-Started"]},
-                {
-                    "group": "Installation",
-                    "pages": [
-                        "docs/installation/Installation",
-                        "docs/installation/Optional-Dependencies",
-                    ],
-                },
-                {"group": "API Reference", "pages": ["PLACEHOLDER"]},
-                # {
-                #     "group": "AutoGen Studio",
-                #     "pages": [
-                #         "docs/autogen-studio/getting-started",
-                #         "docs/autogen-studio/usage",
-                #         "docs/autogen-studio/faqs",
-                #     ],
-                # },
-            ],
-        }
+    # Create mint.json content
+    mint_json_content = {
+        "name": "AG2",
+        "logo": {"dark": "/logo/ag2-white.svg", "light": "/logo/ag2.svg"},
+        "navigation": [
+            {"group": "", "pages": ["docs/Home", "docs/Getting-Started"]},
+            {
+                "group": "Installation",
+                "pages": [
+                    "docs/installation/Installation",
+                    "docs/installation/Optional-Dependencies",
+                ],
+            },
+            {"group": "API Reference", "pages": ["PLACEHOLDER"]},
+            # {
+            #     "group": "AutoGen Studio",
+            #     "pages": [
+            #         "docs/autogen-studio/getting-started",
+            #         "docs/autogen-studio/usage",
+            #         "docs/autogen-studio/faqs",
+            #     ],
+            # },
+        ],
+    }
 
-        # Create NotebooksMetadata.mdx content
-        notebooks_metadata_content = """{/*
+    # Create NotebooksMetadata.mdx content
+    notebooks_metadata_content = """{/*
     Auto-generated file - DO NOT EDIT
     Please edit the add_front_matter_to_metadata_mdx function in process_notebooks.py
     */}
@@ -451,20 +439,22 @@ class TestUpdateNavigation:
             "source": "/notebook/JSON_mode_example.ipynb"
         }];"""
 
-        # Write files
-        mint_json_path = temp_dir / "mint.json"
-        with open(mint_json_path, "w", encoding="utf-8") as f:
-            json.dump(mint_json_content, f, indent=2)
-            f.write("\n")
+    # Write files
+    mint_json_path = tmp_path / "mint.json"
+    with open(mint_json_path, "w", encoding="utf-8") as f:
+        json.dump(mint_json_content, f, indent=2)
+        f.write("\n")
 
-        metadata_path = snippets_dir / "NotebooksMetadata.mdx"
-        with open(metadata_path, "w", encoding="utf-8") as f:
-            f.write(notebooks_metadata_content)
+    metadata_path = snippets_dir / "NotebooksMetadata.mdx"
+    with open(metadata_path, "w", encoding="utf-8") as f:
+        f.write(notebooks_metadata_content)
 
+
+class TestUpdateNavigation:
     def test_extract_example_group(self) -> None:
         with tempfile.TemporaryDirectory() as tmp_dir:
             tmp_path = Path(tmp_dir)
-            self.setup(tmp_path)
+            setup_test_files(tmp_path)
 
             # Run the function
             metadata_path = tmp_path / "snippets" / "data" / "NotebooksMetadata.mdx"
@@ -485,8 +475,8 @@ class TestAddAuthorsAndSocialImgToBlogPosts:
         """Create temporary test directory with blog posts and authors file."""
         with tempfile.TemporaryDirectory() as tmp_dir:
             website_dir = Path(tmp_dir)
-            blog_dir = website_dir / "_blogs"
-            blog_dir.mkdir()
+            blog_dir = website_dir / "docs" / "_blogs"
+            blog_dir.mkdir(parents=True)
 
             # Create first blog post
             post1_dir = blog_dir / "2023-04-21-LLM-tuning-math"
@@ -578,47 +568,49 @@ class TestAddAuthorsAndSocialImgToBlogPosts:
 
             # Create blogs_and_user_stories_authors.yml
             authors_content = textwrap.dedent("""
-                sonichi:
-                    name: Chi Wang
-                    title: Founder of AutoGen (now AG2) & FLAML
-                    url: https://www.linkedin.com/in/chi-wang-autogen/
-                    image_url: https://github.com/sonichi.png
+                authors:
+                    sonichi:
+                        name: Chi Wang
+                        description: Founder of AutoGen (now AG2) & FLAML
+                        url: https://www.linkedin.com/in/chi-wang-autogen/
+                        avatar: https://github.com/sonichi.png
 
-                marklysze:
-                    name: Mark Sze
-                    title: Software Engineer at AG2.ai
-                    url: https://github.com/marklysze
-                    image_url: https://github.com/marklysze.png
+                    marklysze:
+                        name: Mark Sze
+                        description: Software Engineer at AG2.ai
+                        url: https://github.com/marklysze
+                        avatar: https://github.com/marklysze.png
 
-                sternakt:
-                    name: Tvrtko Sternak
-                    title: Machine Learning Engineer at Airt
-                    url: https://github.com/sternakt
-                    image_url: https://github.com/sternakt.png
+                    sternakt:
+                        name: Tvrtko Sternak
+                        description: Machine Learning Engineer at Airt
+                        url: https://github.com/sternakt
+                        avatar: https://github.com/sternakt.png
 
-                davorrunje:
-                    name: Davor Runje
-                    title: CTO at Airt
-                    url: https://github.com/davorrunje
-                    image_url: https://github.com/davorrunje.png
+                    davorrunje:
+                        name: Davor Runje
+                        description: CTO at Airt
+                        url: https://github.com/davorrunje
+                        avatar: https://github.com/davorrunje.png
 
-                davorinrusevljan:
-                    name: Davorin
-                    title: Developer
-                    url: https://github.com/davorinrusevljan
-                    image_url: https://github.com/davorinrusevljan.png
+                    davorinrusevljan:
+                        name: Davorin
+                        description: Developer
+                        url: https://github.com/davorinrusevljan
+                        avatar: https://github.com/davorinrusevljan.png
                 """).lstrip()
             (website_dir / "blogs_and_user_stories_authors.yml").write_text(authors_content)
 
             yield website_dir
 
+    @run_for_optional_imports("yaml", "docs")
     def test_add_authors_and_social_img(self, test_dir: Path) -> None:
         # Run the function
         add_authors_and_social_img_to_blog_and_user_stories(test_dir)
 
         # Get directory paths
         generated_blog_dir = test_dir / "docs" / "blog"
-        blog_dir = test_dir / "_blogs"
+        blog_dir = test_dir / "docs" / "_blogs"
 
         # Verify directory structure matches
         blog_files = set(p.relative_to(blog_dir) for p in blog_dir.glob("**/*.mdx"))
@@ -631,6 +623,7 @@ class TestAddAuthorsAndSocialImgToBlogPosts:
         # Verify content of first blog post
         post1_path = generated_blog_dir / "2023-04-21-LLM-tuning-math" / "index.mdx"
         actual = post1_path.read_text()
+
         assert '<img noZoom className="social-share-img"' in actual
         assert '<p class="name">Chi Wang</p>' in actual
         assert '<p class="name">Davor Runje</p>' not in actual
@@ -782,13 +775,13 @@ class TestEditLinks:
                     },
                     {"group": "Advanced Concepts", "pages": ["docs/user-guide/advanced-concepts/rag"]},
                     {"group": "Model Providers", "pages": ["docs/user-guide/models/openai"]},
+                    {"group": "Reference Agents", "pages": ["docs/user-guide/reference-agents/index"]},
                 ],
             },
             {
                 "group": "Use Cases",
                 "pages": [
                     {"group": "Use cases", "pages": ["docs/use-cases/use-cases/customer-service"]},
-                    {"group": "Reference Agents", "pages": ["docs/use-cases/reference-agents/index"]},
                     {"group": "Notebooks", "pages": ["docs/use-cases/notebooks/notebooks"]},
                     "docs/use-cases/community-gallery/community-gallery",
                 ],
@@ -805,8 +798,8 @@ class TestEditLinks:
             "docs/user-guide/basic-concepts/llm-configuration",
             "docs/user-guide/advanced-concepts/rag",
             "docs/user-guide/models/openai",
+            "docs/user-guide/reference-agents/index",
             "docs/use-cases/use-cases/customer-service",
-            "docs/use-cases/reference-agents/index",
             "docs/use-cases/notebooks/notebooks",
             "docs/use-cases/community-gallery/community-gallery",
             "docs/contributor-guide/contributing",

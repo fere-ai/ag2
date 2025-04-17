@@ -104,8 +104,8 @@ class TestSwarmE2E:
     @pytest.mark.parametrize(
         "credentials_llm_realtime",
         [
-            pytest.param("credentials_gpt_4o_realtime", marks=pytest.mark.openai),
-            pytest.param("credentials_gemini_realtime", marks=pytest.mark.gemini),
+            pytest.param("credentials_gpt_4o_realtime", marks=[pytest.mark.openai_realtime, pytest.mark.aux_neg_flag]),
+            pytest.param("credentials_gemini_realtime", marks=[pytest.mark.gemini_realtime, pytest.mark.aux_neg_flag]),
         ],
     )
     async def test_e2e(

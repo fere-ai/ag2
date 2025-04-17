@@ -4,18 +4,16 @@
 #
 # Portions derived from  https://github.com/microsoft/autogen are under the MIT License.
 # SPDX-License-Identifier: MIT
-from collections.abc import Iterable, Mapping
 from copy import deepcopy
 from time import monotonic, sleep
-from typing import Any, Callable, Literal, Optional, Union
-
-import numpy as np
+from typing import Any, Callable, Iterable, Literal, Mapping, Optional, Union
 
 from ....import_utils import optional_import_block, require_optional_import
 from .base import Document, ItemID, QueryResults, VectorDB
 from .utils import get_logger
 
 with optional_import_block():
+    import numpy as np
     from pymongo import MongoClient, UpdateOne, errors
     from pymongo.collection import Collection
     from pymongo.driver_info import DriverInfo
@@ -34,7 +32,7 @@ def with_id_rename(docs: Iterable) -> list[dict[str, Any]]:
     return [{**{k: v for k, v in d.items() if k != "_id"}, "id": d["_id"]} for d in docs]
 
 
-@require_optional_import(["pymongo", "sentence_transformers"], "retrievechat-mongodb")
+@require_optional_import(["pymongo", "sentence_transformers", "numpy"], "retrievechat-mongodb")
 class MongoDBAtlasVectorDB(VectorDB):
     """A Collection object for MongoDB."""
 
@@ -42,12 +40,12 @@ class MongoDBAtlasVectorDB(VectorDB):
         self,
         connection_string: str = "",
         database_name: str = "vector_db",
-        embedding_function: Optional[Callable] = None,
+        embedding_function: Optional[Callable[..., Any]] = None,
         collection_name: str = None,
         index_name: str = "vector_index",
         overwrite: bool = False,
-        wait_until_index_ready: float = None,
-        wait_until_document_ready: float = None,
+        wait_until_index_ready: Optional[float] = None,
+        wait_until_document_ready: Optional[float] = None,
     ):
         """Initialize the vector database.
 
@@ -59,9 +57,9 @@ class MongoDBAtlasVectorDB(VectorDB):
                 Defaults to None
             index_name: str | Index name for the vector database, defaults to 'vector_index'
             overwrite: bool = False
-            wait_until_index_ready: float | None | Blocking call to wait until the
+            wait_until_index_ready: Optional[float] | Blocking call to wait until the
                 database indexes are ready. None, the default, means no wait.
-            wait_until_document_ready: float | None | Blocking call to wait until the
+            wait_until_document_ready: Optional[float] | Blocking call to wait until the
                 database indexes are ready. None, the default, means no wait.
         """
         self.embedding_function = embedding_function or SentenceTransformer("all-MiniLM-L6-v2").encode
@@ -180,7 +178,7 @@ class MongoDBAtlasVectorDB(VectorDB):
         """Creates a vector search index on the specified collection in MongoDB.
 
         Args:
-            MONGODB_INDEX (str, optional): The name of the vector search index to create. Defaults to "vector_search_index".
+            index_name (str, optional): The name of the vector search index to create. Defaults to "vector_search_index".
             collection (Collection, optional): The MongoDB collection to create the index on. Defaults to None.
         """
         if not self._is_index_ready(collection, index_name):
@@ -271,18 +269,19 @@ class MongoDBAtlasVectorDB(VectorDB):
         docs: list[Document],
         collection_name: str = None,
         upsert: bool = False,
-        batch_size=DEFAULT_INSERT_BATCH_SIZE,
-        **kwargs,
+        batch_size: int = DEFAULT_INSERT_BATCH_SIZE,
+        **kwargs: Any,
     ) -> None:
         """Insert Documents and Vector Embeddings into the collection of the vector database.
 
         For large numbers of Documents, insertion is performed in batches.
 
         Args:
-            docs: List[Document] | A list of documents. Each document is a TypedDict `Document`.
-            collection_name: str | The name of the collection. Default is None.
-            upsert: bool | Whether to update the document if it exists. Default is False.
+            docs: A list of documents. Each document is a TypedDict `Document`.
+            collection_name: The name of the collection. Default is None.
+            upsert: Whether to update the document if it exists. Default is False.
             batch_size: Number of documents to be inserted in each batch
+            **kwargs: Additional keyword arguments.
         """
         if not docs:
             logger.info("No documents to insert.")
@@ -323,7 +322,7 @@ class MongoDBAtlasVectorDB(VectorDB):
                     size = 0
                 i += 1  # noqa: SIM113
             if text_batch:
-                result_ids.update(self._insert_batch(collection, text_batch, metadata_batch, id_batch))  # type: ignore
+                result_ids.update(self._insert_batch(collection, text_batch, metadata_batch, id_batch))
                 input_ids.update(id_batch)
 
             if result_ids != input_ids:
@@ -365,7 +364,7 @@ class MongoDBAtlasVectorDB(VectorDB):
             for i, t, m, e in zip(ids, texts, metadatas, embeddings)
         ]
         # insert the documents in MongoDB Atlas
-        insert_result = collection.insert_many(to_insert)  # type: ignore
+        insert_result = collection.insert_many(to_insert)  # type: ignore[union-attr]
         return insert_result.inserted_ids  # TODO Remove this. Replace by log like update_docs
 
     def update_docs(self, docs: list[Document], collection_name: str = None, **kwargs: Any) -> None:
@@ -411,8 +410,9 @@ class MongoDBAtlasVectorDB(VectorDB):
         """Delete documents from the collection of the vector database.
 
         Args:
-            ids: List[ItemID] | A list of document ids. Each id is a typed `ItemID`.
-            collection_name: str | The name of the collection. Default is None.
+            ids: A list of document ids. Each id is a typed `ItemID`.
+            collection_name: The name of the collection. Default is None.
+            **kwargs: Additional keyword arguments.
         """
         collection = self.get_collection(collection_name)
         return collection.delete_many({"_id": {"$in": ids}})
@@ -453,7 +453,7 @@ class MongoDBAtlasVectorDB(VectorDB):
         collection_name: str = None,
         n_results: int = 10,
         distance_threshold: float = -1,
-        **kwargs,
+        **kwargs: Any,
     ) -> QueryResults:
         """Retrieve documents from the collection of the vector database based on the queries.
 
@@ -507,7 +507,7 @@ def _vector_search(
     distance_threshold: float = -1.0,
     oversampling_factor=10,
     include_embedding=False,
-) -> list[tuple[dict, float]]:
+) -> list[tuple[dict[str, Any], float]]:
     """Core $vectorSearch Aggregation pipeline.
 
     Args:
@@ -517,9 +517,10 @@ def _vector_search(
         index_name: Name of the vector index
         distance_threshold: Only distance measures smaller than this will be returned.
             Don't filter with it if 1 < x < 0. Default is -1.
-        oversampling_factor: int | This times n_results is 'ef' in the HNSW algorithm.
+        oversampling_factor: This times n_results is 'ef' in the HNSW algorithm.
             It determines the number of nearest neighbor candidates to consider during the search phase.
             A higher value leads to more accuracy, but is slower. Default = 10
+        include_embedding: Whether to include the embedding in the results. Default is False.
 
     Returns:
         List of tuples of length n_results from Collection.

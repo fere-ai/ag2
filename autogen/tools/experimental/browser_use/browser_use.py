@@ -2,25 +2,49 @@
 #
 # SPDX-License-Identifier: Apache-2.0
 
-from typing import Annotated, Any, Optional
+from typing import Annotated, Any, Optional, Union
 
-from pydantic import BaseModel
+from pydantic import BaseModel, field_validator
 
 from ....doc_utils import export_module
 from ....import_utils import optional_import_block, require_optional_import
+from ....llm_config import LLMConfig
 from ... import Depends, Tool
 from ...dependency_injection import on
 
 with optional_import_block():
     from browser_use import Agent, Controller
     from browser_use.browser.browser import Browser, BrowserConfig
-    from langchain_anthropic import ChatAnthropic
-    from langchain_google_genai import ChatGoogleGenerativeAI
-    from langchain_ollama import ChatOllama
-    from langchain_openai import AzureChatOpenAI, ChatOpenAI
+
+    from ....interop.langchain.langchain_chat_model_factory import LangChainChatModelFactory
 
 
-__all__ = ["BrowserUseResult", "BrowserUseTool"]
+__all__ = ["BrowserUseResult", "BrowserUseTool", "ExtractedContent"]
+
+
+@export_module("autogen.tools.experimental.browser_use")
+class ExtractedContent(BaseModel):
+    """Extracted content from the browser.
+
+    Attributes:
+        content: The extracted content.
+        url: The URL of the extracted content
+    """
+
+    content: str
+    url: Optional[str]
+
+    @field_validator("url")
+    @classmethod
+    def check_url(cls, v: str) -> Optional[str]:
+        """Check if the URL is about:blank and return None if it is.
+
+        Args:
+            v: The URL to check.
+        """
+        if v == "about:blank":
+            return None
+        return v
 
 
 @export_module("autogen.tools.experimental.browser_use")
@@ -32,12 +56,19 @@ class BrowserUseResult(BaseModel):
         final_result: The final result.
     """
 
-    extracted_content: list[str]
+    extracted_content: list[ExtractedContent]
     final_result: Optional[str]
 
 
 @require_optional_import(
-    ["langchain_anthropic", "langchain_google_genai", "langchain_ollama", "langchain_openai", "browser_use"],
+    [
+        "langchain_anthropic",
+        "langchain_google_genai",
+        "langchain_ollama",
+        "langchain_openai",
+        "langchain_core",
+        "browser_use",
+    ],
     "browser-use",
 )
 @export_module("autogen.tools.experimental")
@@ -47,7 +78,7 @@ class BrowserUseTool(Tool):
     def __init__(  # type: ignore[no-any-unimported]
         self,
         *,
-        llm_config: dict[str, Any],
+        llm_config: Union[LLMConfig, dict[str, Any]],
         browser: Optional["Browser"] = None,
         agent_kwargs: Optional[dict[str, Any]] = None,
         browser_config: Optional[dict[str, Any]] = None,
@@ -71,24 +102,27 @@ class BrowserUseTool(Tool):
                 f"Cannot provide both browser and additional keyword parameters: {browser=}, {browser_config=}"
             )
 
-        if browser is None:
-            # set default value for headless
-            headless = browser_config.pop("headless", True)
-
-            browser_config = BrowserConfig(headless=headless, **browser_config)
-            browser = Browser(config=browser_config)
-
-        # set default value for generate_gif
-        if "generate_gif" not in agent_kwargs:
-            agent_kwargs["generate_gif"] = False
-
         async def browser_use(  # type: ignore[no-any-unimported]
             task: Annotated[str, "The task to perform."],
-            llm_config: Annotated[dict[str, Any], Depends(on(llm_config))],
-            browser: Annotated[Browser, Depends(on(browser))],
+            llm_config: Annotated[Union[LLMConfig, dict[str, Any]], Depends(on(llm_config))],
+            browser: Annotated[Optional[Browser], Depends(on(browser))],
             agent_kwargs: Annotated[dict[str, Any], Depends(on(agent_kwargs))],
+            browser_config: Annotated[dict[str, Any], Depends(on(browser_config))],
         ) -> BrowserUseResult:
-            llm = BrowserUseTool._get_llm(llm_config)
+            agent_kwargs = agent_kwargs.copy()
+            browser_config = browser_config.copy()
+            if browser is None:
+                # set default value for headless
+                headless = browser_config.pop("headless", True)
+
+                browser_config = BrowserConfig(headless=headless, **browser_config)
+                browser = Browser(config=browser_config)
+
+            # set default value for generate_gif
+            if "generate_gif" not in agent_kwargs:
+                agent_kwargs["generate_gif"] = False
+
+            llm = LangChainChatModelFactory.create_base_chat_model(llm_config)
 
             max_steps = agent_kwargs.pop("max_steps", 100)
 
@@ -102,8 +136,12 @@ class BrowserUseTool(Tool):
 
             result = await agent.run(max_steps=max_steps)
 
+            extracted_content = [
+                ExtractedContent(content=content, url=url)
+                for content, url in zip(result.extracted_content(), result.urls())
+            ]
             return BrowserUseResult(
-                extracted_content=result.extracted_content(),
+                extracted_content=extracted_content,
                 final_result=result.final_result(),
             )
 
@@ -114,58 +152,10 @@ class BrowserUseTool(Tool):
         )
 
     @staticmethod
-    def _get_controller(llm_config: dict[str, Any]) -> Any:
+    def _get_controller(llm_config: Union[LLMConfig, dict[str, Any]]) -> Any:
         response_format = (
             llm_config["config_list"][0].get("response_format", None)
             if "config_list" in llm_config
             else llm_config.get("response_format")
         )
         return Controller(output_model=response_format)
-
-    @staticmethod
-    def _get_llm(
-        llm_config: dict[str, Any],
-    ) -> Any:
-        if "config_list" not in llm_config:
-            if "model" in llm_config:
-                return ChatOpenAI(model=llm_config["model"])
-            raise ValueError("llm_config must be a valid config dictionary.")
-
-        try:
-            model = llm_config["config_list"][0]["model"]
-            api_type = llm_config["config_list"][0].get("api_type", "openai")
-
-            # Ollama does not require an api_key
-            api_key = None if api_type == "ollama" else llm_config["config_list"][0]["api_key"]
-
-            if api_type == "deepseek" or api_type == "azure" or api_type == "azure":
-                base_url = llm_config["config_list"][0].get("base_url")
-                if not base_url:
-                    raise ValueError(f"base_url is required for {api_type} api type.")
-            if api_type == "azure":
-                api_version = llm_config["config_list"][0].get("api_version")
-                if not api_version:
-                    raise ValueError(f"api_version is required for {api_type} api type.")
-
-        except (KeyError, TypeError) as e:
-            raise ValueError(f"llm_config must be a valid config dictionary: {e}")
-
-        if api_type == "openai":
-            return ChatOpenAI(model=model, api_key=api_key)
-        elif api_type == "azure":
-            return AzureChatOpenAI(
-                model=model,
-                api_key=api_key,
-                azure_endpoint=base_url,
-                api_version=api_version,
-            )
-        elif api_type == "deepseek":
-            return ChatOpenAI(model=model, api_key=api_key, base_url=base_url)
-        elif api_type == "anthropic":
-            return ChatAnthropic(model=model, api_key=api_key)
-        elif api_type == "google":
-            return ChatGoogleGenerativeAI(model=model, api_key=api_key)
-        elif api_type == "ollama":
-            return ChatOllama(model=model, num_ctx=32000)
-        else:
-            raise ValueError(f"Currently unsupported language model api type for browser use: {api_type}")

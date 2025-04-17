@@ -7,9 +7,11 @@
 from unittest.mock import MagicMock, patch
 
 import pytest
+from pydantic import ValidationError
 
-from autogen.import_utils import skip_on_missing_imports
-from autogen.oai.cerebras import CerebrasClient, calculate_cerebras_cost
+from autogen.import_utils import run_for_optional_imports
+from autogen.llm_config import LLMConfig
+from autogen.oai.cerebras import CerebrasClient, CerebrasLLMConfigEntry, calculate_cerebras_cost
 
 
 # Fixtures for mock data
@@ -31,8 +33,49 @@ def cerebras_client():
     return CerebrasClient(api_key="fake_api_key")
 
 
+def test_cerebras_llm_config_entry():
+    # Test initialization
+    cerebras_llm_config = CerebrasLLMConfigEntry(
+        api_key="fake_api_key",
+        model="llama3.1-8b",
+        max_tokens=1000,
+        seed=42,
+        stream=False,
+        temperature=1,
+    )
+
+    expected = {
+        "api_type": "cerebras",
+        "api_key": "fake_api_key",
+        "model": "llama3.1-8b",
+        "max_tokens": 1000,
+        "seed": 42,
+        "stream": False,
+        "temperature": 1.0,
+        "hide_tools": "never",
+        "tags": [],
+    }
+    actual = cerebras_llm_config.model_dump()
+    assert actual == expected, actual
+
+    llm_config = LLMConfig(
+        config_list=[cerebras_llm_config],
+    )
+    assert llm_config.model_dump() == {
+        "config_list": [expected],
+    }
+
+    with pytest.raises(ValidationError) as e:
+        cerebras_llm_config = CerebrasLLMConfigEntry(
+            model="llama3.1-8b",
+            temperature=1,
+            top_p=0.8,
+        )
+    assert "Value error, temperature and top_p cannot be set at the same time" in str(e.value)
+
+
 # Test initialization and configuration
-@skip_on_missing_imports(["cerebras"], "cerebras")
+@run_for_optional_imports(["cerebras"], "cerebras")
 def test_initialization():
     # Missing any api_key
     with pytest.raises(AssertionError) as assertinfo:
@@ -48,13 +91,13 @@ def test_initialization():
 
 
 # Test standard initialization
-@skip_on_missing_imports(["cerebras"], "cerebras")
+@run_for_optional_imports(["cerebras"], "cerebras")
 def test_valid_initialization(cerebras_client):
     assert cerebras_client.api_key == "fake_api_key", "Config api_key should be correctly set"
 
 
 # Test parameters
-@skip_on_missing_imports(["cerebras"], "cerebras")
+@run_for_optional_imports(["cerebras"], "cerebras")
 def test_parsing_params(cerebras_client):
     # All parameters
     params = {
@@ -72,6 +115,7 @@ def test_parsing_params(cerebras_client):
         "stream": False,
         "temperature": 1,
         "top_p": 0.8,
+        "tool_choice": None,
     }
     result = cerebras_client.parse_params(params)
     assert result == expected_params
@@ -87,6 +131,7 @@ def test_parsing_params(cerebras_client):
         "stream": False,
         "temperature": 1,
         "top_p": None,
+        "tool_choice": None,
     }
     result = cerebras_client.parse_params(params)
     assert result == expected_params
@@ -125,7 +170,7 @@ def test_parsing_params(cerebras_client):
 
 
 # Test cost calculation
-@skip_on_missing_imports(["cerebras"], "cerebras")
+@run_for_optional_imports(["cerebras"], "cerebras")
 def test_cost_calculation(mock_response):
     response = mock_response(
         text="Example response",
@@ -147,7 +192,7 @@ def test_cost_calculation(mock_response):
 
 
 # Test text generation
-@skip_on_missing_imports(["cerebras"], "cerebras")
+@run_for_optional_imports(["cerebras"], "cerebras")
 @patch("autogen.oai.cerebras.CerebrasClient.create")
 def test_create_response(mock_chat, cerebras_client):
     # Mock CerebrasClient.chat response
@@ -181,7 +226,7 @@ def test_create_response(mock_chat, cerebras_client):
 
 
 # Test functions/tools
-@skip_on_missing_imports(["cerebras"], "cerebras")
+@run_for_optional_imports(["cerebras"], "cerebras")
 @patch("autogen.oai.cerebras.CerebrasClient.create")
 def test_create_response_with_tool_call(mock_chat, cerebras_client):
     # Mock `cerebras_response = client.chat(**cerebras_params)`

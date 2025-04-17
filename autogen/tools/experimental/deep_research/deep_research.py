@@ -3,12 +3,13 @@
 # SPDX-License-Identifier: Apache-2.0
 
 import copy
-from typing import Annotated, Any, Callable, List, Optional
+from typing import Annotated, Any, Callable, Union
 
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 
 from ....agentchat import ConversableAgent
 from ....doc_utils import export_module
+from ....llm_config import LLMConfig
 from ... import Depends, Tool
 from ...dependency_injection import on
 
@@ -16,16 +17,33 @@ __all__ = ["DeepResearchTool"]
 
 
 class Subquestion(BaseModel):
-    question: Annotated[str, "The original question."]
-    answer: Annotated[Optional[str], "The answer to the question."] = None
+    question: Annotated[str, Field(description="The original question.")]
+
+    def format(self) -> str:
+        return f"Question: {self.question}\n"
+
+
+class SubquestionAnswer(Subquestion):
+    answer: Annotated[str, Field(description="The answer to the question.")]
 
     def format(self) -> str:
         return f"Question: {self.question}\n{self.answer}\n"
 
 
 class Task(BaseModel):
-    question: Annotated[str, "The original question."]
-    subquestions: Annotated[List[Subquestion], "The subquestions that need to be answered."]
+    question: Annotated[str, Field(description="The original question.")]
+    subquestions: Annotated[list[Subquestion], Field(description="The subquestions that need to be answered.")]
+
+    def format(self) -> str:
+        return f"Task: {self.question}\n\n" + "\n".join(
+            "Subquestion " + str(i + 1) + ":\n" + subquestion.format()
+            for i, subquestion in enumerate(self.subquestions)
+        )
+
+
+class CompletedTask(BaseModel):
+    question: Annotated[str, Field(description="The original question.")]
+    subquestions: Annotated[list[SubquestionAnswer], Field(description="The subquestions and their answers")]
 
     def format(self) -> str:
         return f"Task: {self.question}\n\n" + "\n".join(
@@ -42,7 +60,7 @@ class InformationCrumb(BaseModel):
 
 
 class GatheredInformation(BaseModel):
-    information: List[InformationCrumb]
+    information: list[InformationCrumb]
 
     def format(self) -> str:
         return "Here is the gathered information: \n" + "\n".join(
@@ -59,13 +77,13 @@ class DeepResearchTool(Tool):
 
     def __init__(
         self,
-        llm_config: dict[str, Any],
+        llm_config: Union[LLMConfig, dict[str, Any]],
         max_web_steps: int = 30,
     ):
         """Initialize the DeepResearchTool.
 
         Args:
-            llm_config (dict[str, Any]): The LLM configuration.
+            llm_config (LLMConfig, dict[str, Any]): The LLM configuration.
             max_web_steps (int, optional): The maximum number of web steps. Defaults to 30.
         """
         self.llm_config = llm_config
@@ -99,11 +117,18 @@ class DeepResearchTool(Tool):
 
         def delegate_research_task(
             task: Annotated[str, "The task to perform a research on."],
-            llm_config: Annotated[dict[str, Any], Depends(on(llm_config))],
+            llm_config: Annotated[Union[LLMConfig, dict[str, Any]], Depends(on(llm_config))],
             max_web_steps: Annotated[int, Depends(on(max_web_steps))],
         ) -> str:
-            """
-            Delegate a research task to the agent.
+            """Delegate a research task to the agent.
+
+            Args:
+                task (str): The task to perform a research on.
+                llm_config (LLMConfig, dict[str, Any]): The LLM configuration.
+                max_web_steps (int): The maximum number of web steps.
+
+            Returns:
+                str: The answer to the research task.
             """
 
             @self.summarizer_agent.register_for_execution()
@@ -140,11 +165,11 @@ class DeepResearchTool(Tool):
 
     @staticmethod
     def _get_split_question_and_answer_subquestions(
-        llm_config: dict[str, Any], max_web_steps: int
+        llm_config: Union[LLMConfig, dict[str, Any]], max_web_steps: int
     ) -> Callable[..., Any]:
         def split_question_and_answer_subquestions(
             question: Annotated[str, "The question to split and answer."],
-            llm_config: Annotated[dict[str, Any], Depends(on(llm_config))],
+            llm_config: Annotated[Union[LLMConfig, dict[str, Any]], Depends(on(llm_config))],
             max_web_steps: Annotated[int, Depends(on(max_web_steps))],
         ) -> str:
             decomposition_agent = ConversableAgent(
@@ -189,7 +214,7 @@ class DeepResearchTool(Tool):
                 human_input_mode="NEVER",
             )
 
-            generate_subquestions = DeepResearchTool.get_generate_subquestions(
+            generate_subquestions = DeepResearchTool._get_generate_subquestions(
                 llm_config=llm_config, max_web_steps=max_web_steps
             )
             decomposition_agent.register_for_execution()(generate_subquestions)
@@ -207,31 +232,45 @@ class DeepResearchTool(Tool):
         return split_question_and_answer_subquestions
 
     @staticmethod
-    def get_generate_subquestions(
-        llm_config: dict[str, Any],
+    def _get_generate_subquestions(
+        llm_config: Union[LLMConfig, dict[str, Any]],
         max_web_steps: int,
     ) -> Callable[..., str]:
+        """Get the generate_subquestions method.
+
+        Args:
+            llm_config (Union[LLMConfig, dict[str, Any]]): The LLM configuration.
+            max_web_steps (int): The maximum number of web steps.
+
+        Returns:
+            Callable[..., str]: The generate_subquestions method.
+        """
+
         def generate_subquestions(
             task: Task,
-            llm_config: Annotated[dict[str, Any], Depends(on(llm_config))],
+            llm_config: Annotated[Union[LLMConfig, dict[str, Any]], Depends(on(llm_config))],
             max_web_steps: Annotated[int, Depends(on(max_web_steps))],
         ) -> str:
             if not task.subquestions:
                 task.subquestions = [Subquestion(question=task.question)]
 
+            subquestions_answers: list[SubquestionAnswer] = []
             for subquestion in task.subquestions:
-                subquestion.answer = DeepResearchTool._answer_question(
+                answer = DeepResearchTool._answer_question(
                     subquestion.question, llm_config=llm_config, max_web_steps=max_web_steps
                 )
+                subquestions_answers.append(SubquestionAnswer(question=subquestion.question, answer=answer))
 
-            return f"{DeepResearchTool.SUBQUESTIONS_ANSWER_PREFIX} \n" + task.format()
+            completed_task = CompletedTask(question=task.question, subquestions=subquestions_answers)
+
+            return f"{DeepResearchTool.SUBQUESTIONS_ANSWER_PREFIX} \n" + completed_task.format()
 
         return generate_subquestions
 
     @staticmethod
     def _answer_question(
         question: str,
-        llm_config: dict[str, Any],
+        llm_config: Union[LLMConfig, dict[str, Any]],
         max_web_steps: int,
     ) -> str:
         from ....agents.experimental.websurfer import WebSurferAgent
@@ -245,7 +284,8 @@ class DeepResearchTool(Tool):
             return (content is not None) and content.startswith(DeepResearchTool.ANSWER_CONFIRMED_PREFIX)
 
         websurfer_agent = WebSurferAgent(
-            llm_config=websurfer_config,
+            llm_config=llm_config,
+            web_tool_llm_config=websurfer_config,
             name="WebSurferAgent",
             system_message=(
                 "You are a web surfer agent responsible for gathering information from the web to provide information for answering a question\n"

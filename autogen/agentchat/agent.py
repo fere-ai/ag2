@@ -4,7 +4,7 @@
 #
 # Portions derived from  https://github.com/microsoft/autogen are under the MIT License.
 # SPDX-License-Identifier: MIT
-from typing import Any, Optional, Protocol, Union, runtime_checkable
+from typing import TYPE_CHECKING, Any, Optional, Protocol, Union, runtime_checkable
 
 from ..doc_utils import export_module
 
@@ -42,7 +42,7 @@ class Agent(Protocol):
 
         Args:
             message (dict or str): the message to send. If a dict, it should be
-            a JSON-serializable and follows the OpenAI's ChatCompletion schema.
+                a JSON-serializable and follows the OpenAI's ChatCompletion schema.
             recipient (Agent): the recipient of the message.
             request_reply (bool): whether to request a reply from the recipient.
         """
@@ -58,7 +58,7 @@ class Agent(Protocol):
 
         Args:
             message (dict or str): the message to send. If a dict, it should be
-            a JSON-serializable and follows the OpenAI's ChatCompletion schema.
+                a JSON-serializable and follows the OpenAI's ChatCompletion schema.
             recipient (Agent): the recipient of the message.
             request_reply (bool): whether to request a reply from the recipient.
         """
@@ -74,7 +74,7 @@ class Agent(Protocol):
 
         Args:
             message (dict or str): the message received. If a dict, it should be
-            a JSON-serializable and follows the OpenAI's ChatCompletion schema.
+                a JSON-serializable and follows the OpenAI's ChatCompletion schema.
             sender (Agent): the sender of the message.
             request_reply (bool): whether the sender requests a reply.
         """
@@ -89,7 +89,7 @@ class Agent(Protocol):
 
         Args:
             message (dict or str): the message received. If a dict, it should be
-            a JSON-serializable and follows the OpenAI's ChatCompletion schema.
+                a JSON-serializable and follows the OpenAI's ChatCompletion schema.
             sender (Agent): the sender of the message.
             request_reply (bool): whether the sender requests a reply.
         """
@@ -104,10 +104,11 @@ class Agent(Protocol):
         """Generate a reply based on the received messages.
 
         Args:
-            messages (list[dict]): a list of messages received from other agents.
+            messages (list[dict[str, Any]]): a list of messages received from other agents.
                 The messages are dictionaries that are JSON-serializable and
                 follows the OpenAI's ChatCompletion schema.
             sender: sender of an Agent instance.
+            **kwargs: Additional keyword arguments.
 
         Returns:
             str or dict or None: the generated reply. If None, no reply is generated.
@@ -122,14 +123,16 @@ class Agent(Protocol):
         """(Async) Generate a reply based on the received messages.
 
         Args:
-            messages (list[dict]): a list of messages received from other agents.
+            messages (list[dict[str, Any]]): a list of messages received from other agents.
                 The messages are dictionaries that are JSON-serializable and
                 follows the OpenAI's ChatCompletion schema.
             sender: sender of an Agent instance.
+            **kwargs: Additional keyword arguments.
 
         Returns:
             str or dict or None: the generated reply. If None, no reply is generated.
         """
+        ...
 
 
 @runtime_checkable
@@ -147,3 +150,11 @@ class LLMAgent(Agent, Protocol):
         Args:
             system_message (str): system message for inference.
         """
+
+
+if TYPE_CHECKING:
+    # mypy will fail if Conversible agent does not implement Agent protocol
+    from .conversable_agent import ConversableAgent
+
+    def _check_protocol_implementation(agent: ConversableAgent) -> Agent:
+        return agent

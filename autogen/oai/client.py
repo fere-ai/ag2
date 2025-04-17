@@ -13,9 +13,10 @@ import re
 import sys
 import uuid
 import warnings
-from typing import Any, Callable, Optional, Protocol, Union
+from functools import lru_cache
+from typing import Any, Callable, Literal, Optional, Protocol, Union
 
-from pydantic import BaseModel
+from pydantic import BaseModel, Field, HttpUrl, ValidationInfo, field_validator
 from pydantic.type_adapter import TypeAdapter
 
 from ..cache import Cache
@@ -23,6 +24,7 @@ from ..doc_utils import export_module
 from ..exception_utils import ModelToolNotSupportedError
 from ..import_utils import optional_import_block, require_optional_import
 from ..io.base import IOStream
+from ..llm_config import LLMConfigEntry, register_llm_config
 from ..logger.logger_utils import get_current_ts
 from ..messages.client_messages import StreamMessage, UsageSummaryMessage
 from ..runtime_logging import log_chat_completion, log_new_client, log_new_wrapper, logging_enabled
@@ -52,10 +54,12 @@ if openai_result.is_successful:
     if openai.__version__ >= "1.1.0":
         TOOL_ENABLED = True
     ERROR = None
+    from openai.lib._pydantic import _ensure_strict_json_schema
 else:
     ERROR: Optional[ImportError] = ImportError("Please install openai>=1 and diskcache to use autogen.OpenAIWrapper.")
-    OpenAI = object
-    AzureOpenAI = object
+
+    # OpenAI = object
+    # AzureOpenAI = object
 
 with optional_import_block() as cerebras_result:
     from cerebras.cloud.sdk import (  # noqa
@@ -194,6 +198,86 @@ LEGACY_DEFAULT_CACHE_SEED = 41
 LEGACY_CACHE_DIR = ".cache"
 OPEN_API_BASE_URL_PREFIX = "https://api.openai.com"
 
+OPENAI_FALLBACK_KWARGS = {
+    "api_key",
+    "organization",
+    "project",
+    "base_url",
+    "websocket_base_url",
+    "timeout",
+    "max_retries",
+    "default_headers",
+    "default_query",
+    "http_client",
+    "_strict_response_validation",
+}
+
+AOPENAI_FALLBACK_KWARGS = {
+    "azure_endpoint",
+    "azure_deployment",
+    "api_version",
+    "api_key",
+    "azure_ad_token",
+    "azure_ad_token_provider",
+    "organization",
+    "websocket_base_url",
+    "timeout",
+    "max_retries",
+    "default_headers",
+    "default_query",
+    "http_client",
+    "_strict_response_validation",
+    "base_url",
+    "project",
+}
+
+
+@lru_cache(maxsize=128)
+def log_cache_seed_value(cache_seed_value: Union[str, int], client: "ModelClient") -> None:
+    logger.debug(f"Using cache with seed value {cache_seed_value} for client {client.__class__.__name__}")
+
+
+@register_llm_config
+class OpenAILLMConfigEntry(LLMConfigEntry):
+    api_type: Literal["openai"] = "openai"
+    top_p: Optional[float] = None
+    price: Optional[list[float]] = Field(default=None, min_length=2, max_length=2)
+    tool_choice: Optional[Literal["none", "auto", "required"]] = None
+
+    def create_client(self) -> "ModelClient":
+        raise NotImplementedError("create_client method must be implemented in the derived class.")
+
+
+@register_llm_config
+class AzureOpenAILLMConfigEntry(LLMConfigEntry):
+    api_type: Literal["azure"] = "azure"
+    top_p: Optional[float] = None
+    azure_ad_token_provider: Optional[Union[str, Callable[[], str]]] = None
+    tool_choice: Optional[Literal["none", "auto", "required"]] = None
+
+    def create_client(self) -> "ModelClient":
+        raise NotImplementedError
+
+
+@register_llm_config
+class DeepSeekLLMConfigEntry(LLMConfigEntry):
+    api_type: Literal["deepseek"] = "deepseek"
+    base_url: HttpUrl = HttpUrl("https://api.deepseek.com/v1")
+    temperature: float = Field(0.5, ge=0.0, le=1.0)
+    max_tokens: int = Field(8192, ge=1, le=8192)
+    top_p: Optional[float] = Field(None, ge=0.0, le=1.0)
+    tool_choice: Optional[Literal["none", "auto", "required"]] = None
+
+    @field_validator("top_p", mode="before")
+    @classmethod
+    def check_top_p(cls, v: Any, info: ValidationInfo) -> Any:
+        if v is not None and info.data.get("temperature") is not None:
+            raise ValueError("temperature and top_p cannot be set at the same time.")
+        return v
+
+    def create_client(self) -> None:  # type: ignore [override]
+        raise NotImplementedError("DeepSeekLLMConfigEntry.create_client is not implemented.")
+
 
 @export_module("autogen")
 class ModelClient(Protocol):
@@ -249,10 +333,13 @@ class PlaceHolderClient:
         self.config = config
 
 
+@require_optional_import("openai>=1.66.2", "openai")
 class OpenAIClient:
     """Follows the Client protocol and wraps the OpenAI client."""
 
-    def __init__(self, client: Union[OpenAI, AzureOpenAI], response_format: Optional[BaseModel] = None):
+    def __init__(
+        self, client: Union[OpenAI, AzureOpenAI], response_format: Union[BaseModel, dict[str, Any], None] = None
+    ):
         self._oai_client = client
         self.response_format = response_format
         if (
@@ -267,7 +354,15 @@ class OpenAIClient:
     def message_retrieval(
         self, response: Union[ChatCompletion, Completion]
     ) -> Union[list[str], list[ChatCompletionMessage]]:
-        """Retrieve the messages from the response."""
+        """Retrieve the messages from the response.
+
+        Args:
+            response (ChatCompletion | Completion): The response from openai.
+
+
+        Returns:
+            The message from the response.
+        """
         choices = response.choices
         if isinstance(response, Completion):
             return [choice.text for choice in choices]  # type: ignore [union-attr]
@@ -372,11 +467,16 @@ class OpenAIClient:
 
         return wrapper
 
+    @staticmethod
+    def _convert_system_role_to_user(messages: list[dict[str, Any]]) -> None:
+        for msg in messages:
+            if msg.get("role", "") == "system":
+                msg["role"] = "user"
+
     def create(self, params: dict[str, Any]) -> ChatCompletion:
         """Create a completion for a given config using openai's client.
 
         Args:
-            client: The openai client.
             params: The params for the completion.
 
         Returns:
@@ -390,9 +490,23 @@ class OpenAIClient:
             def _create_or_parse(*args, **kwargs):
                 if "stream" in kwargs:
                     kwargs.pop("stream")
-                kwargs["response_format"] = type_to_response_format_param(
-                    self.response_format or params["response_format"]
-                )
+
+                if isinstance(kwargs["response_format"], dict):
+                    kwargs["response_format"] = {
+                        "type": "json_schema",
+                        "json_schema": {
+                            "schema": _ensure_strict_json_schema(
+                                kwargs["response_format"], path=(), root=kwargs["response_format"]
+                            ),
+                            "name": "response_format",
+                            "strict": True,
+                        },
+                    }
+                else:
+                    kwargs["response_format"] = type_to_response_format_param(
+                        self.response_format or params["response_format"]
+                    )
+
                 return self._oai_client.chat.completions.create(*args, **kwargs)
 
             create_or_parse = _create_or_parse
@@ -404,6 +518,10 @@ class OpenAIClient:
 
         # needs to be updated when the o3 is released to generalize
         is_o1 = "model" in params and params["model"].startswith("o1")
+
+        is_mistral = "model" in params and "mistral" in params["model"]
+        if is_mistral:
+            OpenAIClient._convert_system_role_to_user(params["messages"])
 
         # If streaming is enabled and has messages, then iterate over the chunks of the response.
         if params.get("stream", False) and "messages" in params and not is_o1:
@@ -534,7 +652,7 @@ class OpenAIClient:
 
         return response
 
-    def _process_reasoning_model_params(self, params) -> None:
+    def _process_reasoning_model_params(self, params: dict[str, Any]) -> None:
         """Cater for the reasoning model (o1, o3..) parameters
         please refer: https://platform.openai.com/docs/guides/reasoning#limitations
         """
@@ -602,7 +720,6 @@ class OpenAIClient:
         }
 
 
-@require_optional_import("openai", "openai")
 @export_module("autogen")
 class OpenAIWrapper:
     """A wrapper class for openai client."""
@@ -620,9 +737,15 @@ class OpenAIWrapper:
         "price",
     }
 
-    openai_kwargs = set(inspect.getfullargspec(OpenAI.__init__).kwonlyargs)
-    aopenai_kwargs = set(inspect.getfullargspec(AzureOpenAI.__init__).kwonlyargs)
-    openai_kwargs = openai_kwargs | aopenai_kwargs
+    @property
+    def openai_kwargs(self) -> set[str]:
+        if openai_result.is_successful:
+            return set(inspect.getfullargspec(OpenAI.__init__).kwonlyargs) | set(
+                inspect.getfullargspec(AzureOpenAI.__init__).kwonlyargs
+            )
+        else:
+            return OPENAI_FALLBACK_KWARGS | AOPENAI_FALLBACK_KWARGS
+
     total_usage_summary: Optional[dict[str, Any]] = None
     actual_usage_summary: Optional[dict[str, Any]] = None
 
@@ -636,7 +759,7 @@ class OpenAIWrapper:
 
         Args:
             config_list: a list of config dicts to override the base_config.
-                They can contain additional kwargs as allowed in the [create](/docs/api-reference/autogen/OpenAIWrapper#create) method. E.g.,
+                They can contain additional kwargs as allowed in the [create](/docs/api-reference/autogen/OpenAIWrapper#autogen.OpenAIWrapper.create) method. E.g.,
 
                 ```python
                     config_list = [
@@ -650,7 +773,6 @@ class OpenAIWrapper:
                         {
                             "model": "gpt-3.5-turbo",
                             "api_key": os.environ.get("OPENAI_API_KEY"),
-                            "api_type": "openai",
                             "base_url": "https://api.openai.com/v1",
                         },
                         {
@@ -753,9 +875,15 @@ class OpenAIWrapper:
             # TODO: logging for custom client
         else:
             if api_type is not None and api_type.startswith("azure"):
-                self._configure_azure_openai(config, openai_config)
-                client = AzureOpenAI(**openai_config)
-                self._clients.append(OpenAIClient(client, response_format=response_format))
+
+                @require_optional_import("openai>=1.66.2", "openai")
+                def create_azure_openai_client() -> "AzureOpenAI":
+                    self._configure_azure_openai(config, openai_config)
+                    client = AzureOpenAI(**openai_config)
+                    self._clients.append(OpenAIClient(client, response_format=response_format))
+                    return client
+
+                client = create_azure_openai_client()
             elif api_type is not None and api_type.startswith("cerebras"):
                 if cerebras_import_exception:
                     raise ImportError("Please install `cerebras_cloud_sdk` to use Cerebras OpenAI API.")
@@ -807,18 +935,24 @@ class OpenAIWrapper:
                 client = BedrockClient(response_format=response_format, **openai_config)
                 self._clients.append(client)
             else:
-                client = OpenAI(**openai_config)
-                self._clients.append(OpenAIClient(client, response_format))
+
+                @require_optional_import("openai>=1.66.2", "openai")
+                def create_openai_client() -> "OpenAI":
+                    client = OpenAI(**openai_config)
+                    self._clients.append(OpenAIClient(client, response_format))
+                    return client
+
+                client = create_openai_client()
 
             if logging_enabled():
                 log_new_client(client, self, openai_config)
 
-    def register_model_client(self, model_client_cls: ModelClient, **kwargs):
+    def register_model_client(self, model_client_cls: ModelClient, **kwargs: Any):
         """Register a model client.
 
         Args:
             model_client_cls: A custom client class that follows the ModelClient interface
-            **kwargs: The kwargs for the custom client class to be initialized with
+            kwargs: The kwargs for the custom client class to be initialized with
         """
         existing_client_class = False
         for i, client in enumerate(self._clients):
@@ -893,39 +1027,14 @@ class OpenAIWrapper:
         The config in each client will be overridden by the config.
 
         Args:
-            - context (Dict | None): The context to instantiate the prompt or messages. Default to None.
-                It needs to contain keys that are used by the prompt template or the filter function.
-                E.g., `prompt="Complete the following sentence: {prefix}, context={"prefix": "Today I feel"}`.
-                The actual prompt will be:
-                "Complete the following sentence: Today I feel".
-            - cache (AbstractCache | None): A Cache object to use for response cache. Default to None.
-                Note that the cache argument overrides the legacy cache_seed argument: if this argument is provided,
-                then the cache_seed argument is ignored. If this argument is not provided or None,
-                then the cache_seed argument is used.
-            - agent (AbstractAgent | None): The object responsible for creating a completion if an agent.
-            - (Legacy) cache_seed (int | None) for using the DiskCache. Default to 41.
-                An integer cache_seed is useful when implementing "controlled randomness" for the completion.
-                None for no caching.
-                Note: this is a legacy argument. It is only used when the cache argument is not provided.
-            - filter_func (Callable | None): A function that takes in the context and the response
-                and returns a boolean to indicate whether the response is valid. E.g.,
-
-        ```python
-        def yes_or_no_filter(context, response):
-            return context.get("yes_or_no_choice", False) is False or any(
-                text in ["Yes.", "No."] for text in client.extract_text_or_completion_object(response)
-            )
-        ```
-
-            - allow_format_str_template (bool | None): Whether to allow format string template in the config. Default to false.
-            - api_version (str | None): The api version. Default to None. E.g., "2024-02-01".
+            **config: The config for the completion.
 
         Raises:
-            - RuntimeError: If all declared custom model clients are not registered
-            - APIError: If any model client create call raises an APIError
+            RuntimeError: If all declared custom model clients are not registered
+            APIError: If any model client create call raises an APIError
         """
-        if ERROR:
-            raise ERROR
+        # if ERROR:
+        #     raise ERROR
         invocation_id = str(uuid.uuid4())
         last = len(self._clients) - 1
         # Check if all configs in config list are activated
@@ -972,6 +1081,8 @@ class OpenAIWrapper:
                 # Legacy cache behavior, if cache_seed is given, use DiskCache.
                 cache_client = Cache.disk(cache_seed, LEGACY_CACHE_DIR)
 
+            log_cache_seed_value(cache if cache is not None else cache_seed, client=client)
+
             if cache_client is not None:
                 with cache_client as cache:
                     # Try to get the response from cache
@@ -980,7 +1091,7 @@ class OpenAIWrapper:
                             **params,
                             **{"response_format": json.dumps(TypeAdapter(params["response_format"]).json_schema())},
                         }
-                        if "response_format" in params
+                        if "response_format" in params and not isinstance(params["response_format"], dict)
                         else params
                     )
                     request_ts = get_current_ts()
@@ -1024,32 +1135,38 @@ class OpenAIWrapper:
             try:
                 request_ts = get_current_ts()
                 response = client.create(params)
-            except APITimeoutError as err:
-                logger.debug(f"config {i} timed out", exc_info=True)
-                if i == last:
-                    raise TimeoutError(
-                        "OpenAI API call timed out. This could be due to congestion or too small a timeout value. The timeout can be specified by setting the 'timeout' value (in seconds) in the llm_config (if you are using agents) or the OpenAIWrapper constructor (if you are using the OpenAIWrapper directly)."
-                    ) from err
-            except APIError as err:
-                error_code = getattr(err, "code", None)
-                if logging_enabled():
-                    log_chat_completion(
-                        invocation_id=invocation_id,
-                        client_id=id(client),
-                        wrapper_id=id(self),
-                        agent=agent,
-                        request=params,
-                        response=f"error_code:{error_code}, config {i} failed",
-                        is_cached=0,
-                        cost=0,
-                        start_time=request_ts,
-                    )
+            except Exception as e:
+                if openai_result.is_successful:
+                    if APITimeoutError is not None and isinstance(e, APITimeoutError):
+                        logger.debug(f"config {i} timed out", exc_info=True)
+                        if i == last:
+                            raise TimeoutError(
+                                "OpenAI API call timed out. This could be due to congestion or too small a timeout value. The timeout can be specified by setting the 'timeout' value (in seconds) in the llm_config (if you are using agents) or the OpenAIWrapper constructor (if you are using the OpenAIWrapper directly)."
+                            ) from e
+                    elif APIError is not None and isinstance(e, APIError):
+                        error_code = getattr(e, "code", None)
+                        if logging_enabled():
+                            log_chat_completion(
+                                invocation_id=invocation_id,
+                                client_id=id(client),
+                                wrapper_id=id(self),
+                                agent=agent,
+                                request=params,
+                                response=f"error_code:{error_code}, config {i} failed",
+                                is_cached=0,
+                                cost=0,
+                                start_time=request_ts,
+                            )
 
-                if error_code == "content_filter":
-                    # raise the error for content_filter
-                    raise
-                logger.debug(f"config {i} failed", exc_info=True)
-                if i == last:
+                        if error_code == "content_filter":
+                            # raise the error for content_filter
+                            raise
+                        logger.debug(f"config {i} failed", exc_info=True)
+                        if i == last:
+                            raise
+                    else:
+                        raise
+                else:
                     raise
             except (
                 gemini_InternalServerError,
@@ -1201,7 +1318,7 @@ class OpenAIWrapper:
         """Update the tool call from the chunk.
 
         Args:
-            tool_call_chunk: The tool call chunk.
+            tool_calls_chunk: The tool call chunk.
             full_tool_call: The full tool call.
             completion_tokens: The number of completion tokens.
 

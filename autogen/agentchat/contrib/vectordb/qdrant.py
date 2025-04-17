@@ -7,7 +7,7 @@
 import abc
 import logging
 from collections.abc import Sequence
-from typing import Optional, Union
+from typing import Any, Optional, Union
 
 from ....import_utils import optional_import_block, require_optional_import
 from .base import Document, ItemID, QueryResults, VectorDB
@@ -40,7 +40,7 @@ class FastEmbedEmbeddingFunction(EmbeddingFunction):
         cache_dir: Optional[str] = None,
         threads: Optional[int] = None,
         parallel: Optional[int] = None,
-        **kwargs,
+        **kwargs: Any,
     ):
         """Initialize fastembed.TextEmbedding.
 
@@ -81,16 +81,18 @@ class QdrantVectorDB(VectorDB):
         content_payload_key: str = "_content",
         metadata_payload_key: str = "_metadata",
         collection_options: dict = {},
-        **kwargs,
+        **kwargs: Any,
     ) -> None:
         """Initialize the vector database.
 
         Args:
-            client: qdrant_client.QdrantClient | An instance of QdrantClient.
-            embedding_function: Callable | The embedding function used to generate the vector representation
+            client: An instance of QdrantClient.
+            embedding_function: The embedding function used to generate the vector representation
                 of the documents. Defaults to FastEmbedEmbeddingFunction.
-            collection_options: dict | The options for creating the collection.
-            kwargs: dict | Additional keyword arguments.
+            content_payload_key: The key to use for the content payload. Default is "_content".
+            metadata_payload_key: The key to use for the metadata payload. Default is "_metadata".
+            collection_options: The options for creating the collection.
+            **kwargs: Additional keyword arguments.
         """
         self.client: QdrantClient = client or QdrantClient(location=":memory:")
         self.embedding_function = embedding_function or FastEmbedEmbeddingFunction()
@@ -208,7 +210,7 @@ class QdrantVectorDB(VectorDB):
         collection_name: str = None,
         n_results: int = 10,
         distance_threshold: float = 0,
-        **kwargs,
+        **kwargs: Any,
     ) -> QueryResults:
         """Retrieve documents from the collection of the vector database based on the queries.
 

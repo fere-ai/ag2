@@ -1,10 +1,17 @@
-name: Deploy Redirect Page
+name: Deploy MkDocs to GitHub Pages
 
 on:
   push:
     branches: [main]
     paths:
+      - "autogen/**"
+      - "website/**"
       - ".github/workflows/deploy-website.yml"
+      - ".github/workflows/docs-check-broken-links.yml"
+      - "scripts/broken-links-check.sh"
+      - "scripts/docs_build_mkdocs.sh"
+      - "scripts/docs_serve_mkdocs.sh"
+      - ".muffet-excluded-links.txt"
   workflow_dispatch:
 permissions:
   contents: write
@@ -15,68 +22,55 @@ jobs:
       # Step 1: Check out the repository
       - name: Checkout repository
         uses: actions/checkout@v4
-
-      # Step 2: Create redirect HTML files
-      - name: Create redirect HTML
-        run: |
-          mkdir -p dist
-          # Homepage redirect
-          cat > dist/index.html << 'EOF'
-          <!DOCTYPE html>
-          <html>
-            <head>
-              <meta charset="UTF-8">
-              <meta http-equiv="refresh" content="0; url=https://docs.ag2.ai">
-              <script>window.location.href = "https://docs.ag2.ai";</script>
-              <title>Page Redirection</title>
-            </head>
-            <body>
-              If you are not redirected automatically, follow this <a href="https://docs.ag2.ai">link to the new documentation</a>.
-            </body>
-          </html>
-          EOF
-
-          # Deep link handling
-          cat > dist/404.html << 'EOF'
-          <!DOCTYPE html>
-          <html>
-            <head>
-              <meta charset="UTF-8">
-              <script>
-                const newDomain = 'https://docs.ag2.ai';
-                let path = window.location.pathname;
-                const hash = window.location.hash;
-
-                // Remove /ag2/ prefix and trailing slash
-                path = path.replace(/^\/ag2\//, '/').replace(/\/$/, "");
-
-                // Transform blog and talks URLs
-                if (path.includes('/blog/') || path.includes('/talks/')) {
-                  const afterPrefix = path.split(/\/(blog|talks)\//)[2];
-                  const transformed = afterPrefix.replace(/\//g, '-');
-                  path = path.replace(afterPrefix, transformed);
-                }
-
-                // Handle -index and create final URL with hash
-                const redirectUrl = (newDomain + path).replace(/-index$/, "/index") + hash;
-
-                window.location.href = redirectUrl;
-              </script>
-              <title>Page Redirection</title>
-            </head>
-            <body>
-              If you are not redirected automatically, follow this <a href="https://docs.ag2.ai">link to the new documentation</a>.
-            </body>
-          </html>
-          EOF
-
-      # Step 3: Deploy to gh-pages branch
-      - name: Deploy to GitHub Pages
-        uses: peaceiris/actions-gh-pages@v4
         with:
-          github_token: ${{ secrets.GITHUB_TOKEN }}
-          publish_dir: ./dist
-          force_orphan: true
-          user_name: 'github-actions[bot]'
-          user_email: 'github-actions[bot]@users.noreply.github.com'
-          commit_message: 'Deploy redirect page'
+          lfs: true
+          fetch-depth: 0
+
+      - uses: astral-sh/setup-uv@v5
+        with:
+          version: "latest"
+      - uses: actions/setup-python@v5
+        with:
+          python-version: 3.x
+
+      - name: Install quarto
+        uses: quarto-dev/quarto-actions/setup@v2
+
+      # Step 3: Build MkDocs
+      - name: Build documentation
+        run: |
+          uv venv
+          . .venv/bin/activate
+          uv pip install -e ".[docs]"
+          ./scripts/docs_build_mkdocs.sh --force
+          ls -la ./website/mkdocs/site
+        working-directory: .
+
+      # Step 3: Configure Git user
+      - name: Configure Git user
+        run: |
+          git config --local user.email "github-actions[bot]@users.noreply.github.com"
+          git config --local user.name "github-actions[bot]"
+
+      # Step 4: Deploy to gh-pages branch
+      - name: Deploy to GitHub Pages
+        run: |
+          . .venv/bin/activate
+
+          # Get version directly from the package using a more reliable method
+          VERSION=$(python -c 'import os, sys; sys.path.insert(0, os.getcwd()); import autogen; print(".".join(autogen.__version__.split(".")[:3]))')
+          echo "VERSION=$VERSION" >> $GITHUB_ENV
+
+          # Check if version contains "rc"
+          IS_RC=$(python -c 'import os, sys; sys.path.insert(0, os.getcwd()); import autogen; print("rc" in autogen.__version__ or "dev" in autogen.__version__)')
+          echo "IS_RC=$IS_RC" >> $GITHUB_ENV
+
+          echo $VERSION
+          echo $IS_RC
+
+          if [ "$IS_RC" == "False" ]; then
+            cd website/mkdocs && mike deploy -F mkdocs.yml --update-aliases $VERSION latest
+            mike set-default --push --allow-empty -F mkdocs.yml latest
+          else
+            cd website/mkdocs && mike deploy --push -F mkdocs.yml --update-aliases $VERSION
+          fi

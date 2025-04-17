@@ -79,17 +79,18 @@ import os
 import autogen
 from autogen.agentchat.contrib.capabilities import transform_messages
 
-system_message = "You are a world class researcher."
-config_list = [{"model": "gpt-4-turbo", "api_key": os.getenv("OPENAI_API_KEY")}]
+system_message = "You are a world-class researcher."
+# Put your key in the OPENAI_API_KEY environment variable
+llm_config = LLMConfig(api_type="openai", model="gpt-4o")
 
 # Define your agent; the user proxy and an assistant
-researcher = autogen.ConversableAgent(
-    "assistant",
-    llm_config={"config_list": config_list},
-    max_consecutive_auto_reply=1,
-    system_message=system_message,
-    human_input_mode="NEVER",
-)
+with llm_config:
+    researcher = autogen.ConversableAgent(
+        "assistant",
+        max_consecutive_auto_reply=1,
+        system_message=system_message,
+        human_input_mode="NEVER",
+    )
 user_proxy = autogen.UserProxyAgent(
     "user_proxy",
     human_input_mode="NEVER",
@@ -140,14 +141,16 @@ The framework's architecture is designed so that it can be seamlessly integrated
 LLMLingua's flexibility allows for various configurations, such as customizing instructions for the LLM or setting specific token counts for compression. This example demonstrates how to set a target token count, enabling the use of models with smaller context sizes like gpt-3.5.
 
 ```python
-config_list = [{"model": "gpt-3.5-turbo", "api_key": os.getenv("OPENAI_API_KEY")}]
-researcher = autogen.ConversableAgent(
-    "assistant",
-    llm_config={"config_list": config_list},
-    max_consecutive_auto_reply=1,
-    system_message=system_message,
-    human_input_mode="NEVER",
-)
+# Put your key in the OPENAI_API_KEY environment variable
+llm_config = LLMConfig(api_type="openai", model="gpt-4o-mini")
+
+with llm_config:
+    researcher = autogen.ConversableAgent(
+        "assistant",
+        max_consecutive_auto_reply=1,
+        system_message=system_message,
+        human_input_mode="NEVER",
+    )
 
 text_compressor = TextMessageCompressor(
     text_compressor=llm_lingua,

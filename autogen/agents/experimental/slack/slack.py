@@ -2,11 +2,10 @@
 #
 # SPDX-License-Identifier: Apache-2.0
 
-from typing import Optional, Union
+from typing import Any, Optional
 
 from .... import ConversableAgent
 from ....doc_utils import export_module
-from ....tools import Tool
 from ....tools.experimental import SlackRetrieveTool, SlackSendTool
 
 __all__ = ["SlackAgent"]
@@ -16,35 +15,40 @@ __all__ = ["SlackAgent"]
 class SlackAgent(ConversableAgent):
     """An agent that can send messages and retrieve messages on Slack."""
 
+    DEFAULT_SYSTEM_MESSAGE = (
+        "You are a helpful AI assistant that communicates through Slack. "
+        "Remember that Slack uses Markdown-like formatting and has message length limits. "
+        "Keep messages clear and concise, and consider using appropriate formatting when helpful."
+    )
+
     def __init__(
         self,
-        system_message: Optional[Union[str, list]] = None,
-        *args,
+        name: str,
+        system_message: Optional[str] = None,
+        *,
         bot_token: str,
         channel_id: str,
         has_writing_instructions: bool = True,
-        **kwargs,
+        **kwargs: Any,
     ) -> None:
         """Initialize the SlackAgent.
 
         Args:
-            llm_config (dict[str, Any]): The LLM configuration.
-            bot_token (str): Bot User OAuth Token starting with "xoxb-".
-            channel_id (str): Channel ID where messages will be sent.
-            has_writing_instructions (bool): Whether to add writing instructions to the system message. Defaults to True.
+            name: name of the agent.
+            system_message: system message for the ChatCompletion inference.
+            bot_token: Bot User OAuth Token starting with "xoxb-".
+            channel_id: Channel ID where messages will be sent.
+            has_writing_instructions: Whether to add writing instructions to the system message. Defaults to True.
+            **kwargs: Additional keyword arguments passed to the parent ConversableAgent class.
         """
-        system_message = system_message or (
-            "You are a helpful AI assistant that communicates through Slack. "
-            "Remember that Slack uses Markdown-like formatting and has message length limits. "
-            "Keep messages clear and concise, and consider using appropriate formatting when helpful."
-        )
+        slack_system_message = system_message or self.DEFAULT_SYSTEM_MESSAGE
 
         self._send_tool = SlackSendTool(bot_token=bot_token, channel_id=channel_id)
         self._retrieve_tool = SlackRetrieveTool(bot_token=bot_token, channel_id=channel_id)
 
         # Add formatting instructions
         if has_writing_instructions:
-            system_message = system_message + (
+            formatting_instructions = (
                 "\nFormat guidelines for Slack:\n"
                 "Format guidelines for Slack:\n"
                 "1. Max message length: 40,000 characters\n"
@@ -59,11 +63,9 @@ class SlackAgent(ConversableAgent):
                 "6. Can use <!here> or <!channel> for notifications"
             )
 
-        super().__init__(*args, system_message=system_message, **kwargs)
+            slack_system_message = slack_system_message + formatting_instructions
+
+        super().__init__(name=name, system_message=slack_system_message, **kwargs)
 
         self.register_for_llm()(self._send_tool)
         self.register_for_llm()(self._retrieve_tool)
-
-    @property
-    def tools(self) -> list[Tool]:
-        return [self._send_tool, self._retrieve_tool]

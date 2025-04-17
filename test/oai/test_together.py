@@ -8,8 +8,9 @@ from unittest.mock import MagicMock, patch
 
 import pytest
 
-from autogen.import_utils import skip_on_missing_imports
-from autogen.oai.together import TogetherClient, calculate_together_cost
+from autogen.import_utils import run_for_optional_imports
+from autogen.llm_config import LLMConfig
+from autogen.oai.together import TogetherClient, TogetherLLMConfigEntry, calculate_together_cost
 
 
 # Fixtures for mock data
@@ -31,7 +32,34 @@ def together_client():
     return TogetherClient(api_key="fake_api_key")
 
 
-@skip_on_missing_imports("together", "together")
+def test_together_llm_config_entry():
+    together_llm_config = TogetherLLMConfigEntry(
+        model="mistralai/Mixtral-8x7B-Instruct-v0.1",
+        api_key="fake_api_key",
+        safety_model="Meta-Llama/Llama-Guard-7b",
+    )
+    expected = {
+        "api_type": "together",
+        "model": "mistralai/Mixtral-8x7B-Instruct-v0.1",
+        "api_key": "fake_api_key",
+        "safety_model": "Meta-Llama/Llama-Guard-7b",
+        "tags": [],
+        "max_tokens": 512,
+        "stream": False,
+        "hide_tools": "never",
+    }
+    actual = together_llm_config.model_dump()
+    assert actual == expected, actual
+
+    llm_config = LLMConfig(
+        config_list=[together_llm_config],
+    )
+    assert llm_config.model_dump() == {
+        "config_list": [expected],
+    }
+
+
+@run_for_optional_imports("together", "together")
 class TestTogether:
     # Test initialization and configuration
     def test_initialization(self) -> None:

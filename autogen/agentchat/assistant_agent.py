@@ -4,9 +4,10 @@
 #
 # Portions derived from  https://github.com/microsoft/autogen are under the MIT License.
 # SPDX-License-Identifier: MIT
-from typing import Callable, Literal, Optional, Union
+from typing import Any, Callable, Literal, Optional, Union
 
 from ..doc_utils import export_module
+from ..llm_config import LLMConfig
 from ..runtime_logging import log_new_agent, logging_enabled
 from .conversable_agent import ConversableAgent
 
@@ -42,19 +43,19 @@ Reply "TERMINATE" in the end when everything is done.
         self,
         name: str,
         system_message: Optional[str] = DEFAULT_SYSTEM_MESSAGE,
-        llm_config: Optional[Union[dict, Literal[False]]] = None,
-        is_termination_msg: Optional[Callable[[dict], bool]] = None,
+        llm_config: Optional[Union[LLMConfig, dict[str, Any], Literal[False]]] = None,
+        is_termination_msg: Optional[Callable[[dict[str, Any]], bool]] = None,
         max_consecutive_auto_reply: Optional[int] = None,
         human_input_mode: Literal["ALWAYS", "NEVER", "TERMINATE"] = "NEVER",
         description: Optional[str] = None,
-        **kwargs,
+        **kwargs: Any,
     ):
         """Args:
         name (str): agent name.
         system_message (str): system message for the ChatCompletion inference.
             Please override this attribute if you want to reprogram the agent.
         llm_config (dict or False or None): llm inference configuration.
-            Please refer to [OpenAIWrapper.create](/docs/api-reference/autogen/OpenAIWrapper#create)
+            Please refer to [OpenAIWrapper.create](/docs/api-reference/autogen/OpenAIWrapper#autogen.OpenAIWrapper.create)
             for available options.
         is_termination_msg (function): a function that takes a message in the form of a dictionary
             and returns a boolean value indicating if this received message is a termination message.

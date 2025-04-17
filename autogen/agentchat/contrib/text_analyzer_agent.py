@@ -6,6 +6,7 @@
 # SPDX-License-Identifier: MIT
 from typing import Any, Literal, Optional, Union
 
+from ...llm_config import LLMConfig
 from ..agent import Agent
 from ..assistant_agent import ConversableAgent
 
@@ -23,15 +24,15 @@ class TextAnalyzerAgent(ConversableAgent):
         name="analyzer",
         system_message: Optional[str] = system_message,
         human_input_mode: Literal["ALWAYS", "NEVER", "TERMINATE"] = "NEVER",
-        llm_config: Optional[Union[dict, bool]] = None,
-        **kwargs,
+        llm_config: Optional[Union[LLMConfig, dict[str, Any], bool]] = None,
+        **kwargs: Any,
     ):
         """Args:
         name (str): name of the agent.
         system_message (str): system message for the ChatCompletion inference.
         human_input_mode (str): This agent should NEVER prompt the human for input.
-        llm_config (dict or False): llm inference configuration.
-            Please refer to [OpenAIWrapper.create](/docs/api-reference/autogen/OpenAIWrapper#create)
+        llm_config (LLMConfig or dict or False): llm inference configuration.
+            Please refer to [OpenAIWrapper.create](/docs/api-reference/autogen/OpenAIWrapper#autogen.OpenAIWrapper.create)
             for available options.
             To disable llm-based auto reply, set to False.
         **kwargs (dict): other kwargs in [ConversableAgent](/docs/api-reference/autogen/ConversableAgent#conversableagent).
@@ -47,10 +48,10 @@ class TextAnalyzerAgent(ConversableAgent):
 
     def _analyze_in_reply(
         self,
-        messages: Optional[list[dict]] = None,
+        messages: Optional[list[dict[str, Any]]] = None,
         sender: Optional[Agent] = None,
         config: Optional[Any] = None,
-    ) -> tuple[bool, Union[str, dict, None]]:
+    ) -> tuple[bool, Optional[Union[str, dict[str, Any]]]]:
         """Analyzes the given text as instructed, and returns the analysis as a message.
         Assumes exactly two messages containing the text to analyze and the analysis instructions.
         See Teachability.analyze for an example of how to use this method.

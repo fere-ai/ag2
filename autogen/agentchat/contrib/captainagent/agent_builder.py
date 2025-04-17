@@ -11,13 +11,14 @@ import logging
 import re
 import subprocess as sp
 import time
-from typing import Optional, Union
+from typing import Any, Optional, Union
 
 from termcolor import colored
 
-from .... import AssistantAgent, ConversableAgent, OpenAIWrapper, UserProxyAgent, config_list_from_json
+from .... import AssistantAgent, ConversableAgent, OpenAIWrapper, UserProxyAgent
 from ....code_utils import CODE_BLOCK_PATTERN
 from ....doc_utils import export_module
+from ....llm_config import LLMConfig
 
 __all__ = ["AgentBuilder"]
 
@@ -185,6 +186,7 @@ Match roles in the role set to each expert in expert set.
         self,
         config_file_or_env: Optional[str] = "OAI_CONFIG_LIST",
         config_file_location: Optional[str] = "",
+        llm_config: Optional[Union[LLMConfig, dict[str, Any]]] = None,
         builder_model: Optional[Union[str, list]] = [],
         agent_model: Optional[Union[str, list]] = [],
         builder_model_tags: Optional[list] = [],
@@ -194,11 +196,22 @@ Match roles in the role set to each expert in expert set.
         """(These APIs are experimental and may change in the future.)
 
         Args:
-            config_file_or_env: path or environment of the OpenAI api configs.
-            builder_model: specify a model as the backbone of build manager.
-            agent_model: specify a model as the backbone of participant agents.
-            endpoint_building_timeout: timeout for building up an endpoint server.
-            max_agents: max agents for each task.
+            config_file_or_env (Optional[str], optional): Path to the config file or name of the environment
+                variable containing the OpenAI API configurations. Defaults to "OAI_CONFIG_LIST".
+            config_file_location (Optional[str], optional): Location of the config file if not in the
+                current directory. Defaults to "".
+            llm_config (Optional[Union[LLMConfig, dict[str, Any]]], optional): Specific configs for LLM
+            builder_model (Optional[Union[str, list]], optional): Model identifier(s) to use as the
+                builder/manager model that coordinates agent creation. Can be a string or list of strings.
+                Filters the config list to match these models. Defaults to [].
+            agent_model (Optional[Union[str, list]], optional): Model identifier(s) to use for the
+                generated participant agents. Can be a string or list of strings. Defaults to [].
+            builder_model_tags (Optional[list], optional): Tags to filter which models from the config
+                can be used as builder models. Defaults to [].
+            agent_model_tags (Optional[list], optional): Tags to filter which models from the config
+                can be used as agent models. Defaults to [].
+            max_agents (Optional[int], optional): Maximum number of agents to create for each task.
+                Defaults to 5.
         """
         builder_model = builder_model if isinstance(builder_model, list) else [builder_model]
         builder_filter_dict = {}
@@ -206,9 +219,14 @@ Match roles in the role set to each expert in expert set.
             builder_filter_dict.update({"model": builder_model})
         if len(builder_model_tags) != 0:
             builder_filter_dict.update({"tags": builder_model_tags})
-        builder_config_list = config_list_from_json(
-            config_file_or_env, file_location=config_file_location, filter_dict=builder_filter_dict
+
+        llm_config = (
+            LLMConfig.from_json(env=config_file_or_env, file_location=config_file_location).where(**builder_filter_dict)
+            if llm_config is None
+            else llm_config
         )
+        builder_config_list = llm_config.config_list
+
         if len(builder_config_list) == 0:
             raise RuntimeError(
                 f"Fail to initialize build manager: {builder_model}{builder_model_tags} does not exist in {config_file_or_env}. "
@@ -220,9 +238,10 @@ Match roles in the role set to each expert in expert set.
         self.agent_model_tags = agent_model_tags
         self.config_file_or_env = config_file_or_env
         self.config_file_location = config_file_location
+        self.llm_config = llm_config
 
         self.building_task: str = None
-        self.agent_configs: list[dict] = []
+        self.agent_configs: list[dict[str, Any]] = []
         self.open_ports: list[str] = []
         self.agent_procs: dict[str, tuple[sp.Popen, str]] = {}
         self.agent_procs_assign: dict[str, tuple[ConversableAgent, str]] = {}
@@ -238,9 +257,9 @@ Match roles in the role set to each expert in expert set.
 
     def _create_agent(
         self,
-        agent_config: dict,
+        agent_config: dict[str, Any],
         member_name: list[str],
-        llm_config: dict,
+        llm_config: Union[LLMConfig, dict[str, Any]],
         use_oai_assistant: Optional[bool] = False,
     ) -> AssistantAgent:
         """Create a group chat participant agent.
@@ -254,9 +273,9 @@ Match roles in the role set to each expert in expert set.
                 2. agent_name: use to identify an agent in the group chat.
                 3. system_message: including persona, task solving instruction, etc.
                 4. description: brief description of an agent that help group chat manager to pick the speaker.
+            member_name: a list of agent names in the group chat.
             llm_config: specific configs for LLM (e.g., config_list, seed, temperature, ...).
             use_oai_assistant: use OpenAI assistant api instead of self-constructed agent.
-            world_size: the max size of parallel tensors (in most of the cases, this is identical to the amount of GPUs).
 
         Returns:
             agent: a set-up agent.
@@ -277,8 +296,12 @@ Match roles in the role set to each expert in expert set.
             filter_dict.update({"model": model_name_or_hf_repo})
         if len(model_tags) > 0:
             filter_dict.update({"tags": model_tags})
-        config_list = config_list_from_json(
-            self.config_file_or_env, file_location=self.config_file_location, filter_dict=filter_dict
+        config_list = (
+            LLMConfig.from_json(env=self.config_file_or_env, file_location=self.config_file_location)
+            .where(**filter_dict)
+            .config_list
+            if self.llm_config is None
+            else self.llm_config.config_list
         )
         if len(config_list) == 0:
             raise RuntimeError(
@@ -364,23 +387,26 @@ Match roles in the role set to each expert in expert set.
     def build(
         self,
         building_task: str,
-        default_llm_config: dict,
+        default_llm_config: Union[LLMConfig, dict[str, Any]],
         coding: Optional[bool] = None,
-        code_execution_config: Optional[dict] = None,
+        code_execution_config: Optional[dict[str, Any]] = None,
         use_oai_assistant: Optional[bool] = False,
         user_proxy: Optional[ConversableAgent] = None,
         max_agents: Optional[int] = None,
-        **kwargs,
-    ) -> tuple[list[ConversableAgent], dict]:
+        **kwargs: Any,
+    ) -> tuple[list[ConversableAgent], dict[str, Any]]:
         """Auto build agents based on the building task.
 
         Args:
             building_task: instruction that helps build manager (gpt-4) to decide what agent should be built.
+            default_llm_config: specific configs for LLM (e.g., config_list, seed, temperature, ...).
             coding: use to identify if the user proxy (a code interpreter) should be added.
             code_execution_config: specific configs for user proxy (e.g., last_n_messages, work_dir, ...).
-            default_llm_config: specific configs for LLM (e.g., config_list, seed, temperature, ...).
             use_oai_assistant: use OpenAI assistant api instead of self-constructed agent.
             user_proxy: user proxy's class that can be used to replace the default user proxy.
+            max_agents (Optional[int], default=None): Maximum number of agents to create for the task. If None, uses the value from self.max_agents.
+            **kwargs (Any): Additional arguments to pass to _build_agents.
+                - agent_configs: Optional list of predefined agent configurations to use.
 
         Returns:
             agent_list: a list of agents.
@@ -397,7 +423,7 @@ Match roles in the role set to each expert in expert set.
         if max_agents is None:
             max_agents = self.max_agents
 
-        agent_configs = []
+        agent_configs = kwargs.get("agent_configs", [])
         self.building_task = building_task
 
         print(colored("==> Generating agents...", "green"), flush=True)
@@ -489,15 +515,15 @@ Match roles in the role set to each expert in expert set.
         self,
         building_task: str,
         library_path_or_json: str,
-        default_llm_config: dict,
+        default_llm_config: Union[LLMConfig, dict[str, Any]],
         top_k: int = 3,
         coding: Optional[bool] = None,
-        code_execution_config: Optional[dict] = None,
+        code_execution_config: Optional[dict[str, Any]] = None,
         use_oai_assistant: Optional[bool] = False,
         embedding_model: Optional[str] = "all-mpnet-base-v2",
         user_proxy: Optional[ConversableAgent] = None,
-        **kwargs,
-    ) -> tuple[list[ConversableAgent], dict]:
+        **kwargs: Any,
+    ) -> tuple[list[ConversableAgent], dict[str, Any]]:
         """Build agents from a library.
         The library is a list of agent configs, which contains the name and system_message for each agent.
         We use a build manager to decide what agent in that library should be involved to the task.
@@ -506,29 +532,19 @@ Match roles in the role set to each expert in expert set.
             building_task: instruction that helps build manager (gpt-4) to decide what agent should be built.
             library_path_or_json: path or JSON string config of agent library.
             default_llm_config: specific configs for LLM (e.g., config_list, seed, temperature, ...).
+            top_k: number of results to return.
             coding: use to identify if the user proxy (a code interpreter) should be added.
             code_execution_config: specific configs for user proxy (e.g., last_n_messages, work_dir, ...).
             use_oai_assistant: use OpenAI assistant api instead of self-constructed agent.
             embedding_model: a Sentence-Transformers model use for embedding similarity to select agents from library.
                 As reference, chromadb use "all-mpnet-base-v2" as default.
             user_proxy: user proxy's class that can be used to replace the default user proxy.
+            **kwargs: Additional arguments to pass to _build_agents.
 
         Returns:
             agent_list: a list of agents.
             cached_configs: cached configs.
         """
-        import sqlite3
-
-        # Some system will have an unexpected sqlite3 version.
-        # Check if the user has installed pysqlite3.
-        if int(sqlite3.version.split(".")[0]) < 3:
-            try:
-                __import__("pysqlite3")
-                import sys
-
-                sys.modules["sqlite3"] = sys.modules.pop("pysqlite3")
-            except Exception as e:
-                raise e
         import chromadb
         from chromadb.utils import embedding_functions
 
@@ -653,12 +669,13 @@ Match roles in the role set to each expert in expert set.
 
     def _build_agents(
         self, use_oai_assistant: Optional[bool] = False, user_proxy: Optional[ConversableAgent] = None, **kwargs
-    ) -> tuple[list[ConversableAgent], dict]:
+    ) -> tuple[list[ConversableAgent], dict[str, Any]]:
         """Build agents with generated configs.
 
         Args:
             use_oai_assistant: use OpenAI assistant api instead of self-constructed agent.
             user_proxy: user proxy's class that can be used to replace the default user proxy.
+            **kwargs: Additional keyword arguments.
 
         Returns:
             agent_list: a list of agents.
@@ -717,14 +734,17 @@ Match roles in the role set to each expert in expert set.
         filepath: Optional[str] = None,
         config_json: Optional[str] = None,
         use_oai_assistant: Optional[bool] = False,
-        **kwargs,
-    ) -> tuple[list[ConversableAgent], dict]:
+        **kwargs: Any,
+    ) -> tuple[list[ConversableAgent], dict[str, Any]]:
         """Load building configs and call the build function to complete building without calling online LLMs' api.
 
         Args:
             filepath: filepath or JSON string for the save config.
             config_json: JSON string for the save config.
             use_oai_assistant: use OpenAI assistant api instead of self-constructed agent.
+            **kwargs (Any): Additional arguments to pass to _build_agents:
+                - code_execution_config (Optional[dict[str, Any]]): If provided, overrides the
+                code execution configuration from the loaded config.
 
         Returns:
             agent_list: a list of agents.

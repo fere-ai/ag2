@@ -6,10 +6,11 @@
 # SPDX-License-Identifier: MIT
 import os
 import pickle
-from typing import Optional, Union
+from typing import Any, Optional, Union
 
 from ....formatting_utils import colored
 from ....import_utils import optional_import_block, require_optional_import
+from ....llm_config import LLMConfig
 from ...assistant_agent import ConversableAgent
 from ..text_analyzer_agent import TextAnalyzerAgent
 from .agent_capability import AgentCapability
@@ -42,7 +43,7 @@ class Teachability(AgentCapability):
         path_to_db_dir: Optional[str] = "./tmp/teachable_agent_db",
         recall_threshold: Optional[float] = 1.5,
         max_num_retrievals: Optional[int] = 10,
-        llm_config: Optional[Union[dict, bool]] = None,
+        llm_config: Optional[Union[LLMConfig, dict[str, Any], bool]] = None,
     ):
         """Args:
         verbosity (Optional, int): # 0 (default) for basic info, 1 to add memory operations, 2 for analyzer messages, 3 for memo lists.
@@ -50,7 +51,7 @@ class Teachability(AgentCapability):
         path_to_db_dir (Optional, str): path to the directory where this particular agent's DB is stored. Default "./tmp/teachable_agent_db"
         recall_threshold (Optional, float): The maximum distance for retrieved memos, where 0.0 is exact match. Default 1.5. Larger values allow more (but less relevant) memos to be recalled.
         max_num_retrievals (Optional, int): The maximum number of memos to retrieve from the DB. Default 10.
-        llm_config (dict or False): llm inference configuration passed to TextAnalyzerAgent.
+        llm_config (LLMConfig or dict or False): llm inference configuration passed to TextAnalyzerAgent.
             If None, TextAnalyzerAgent uses llm_config from the teachable agent.
         """
         self.verbosity = verbosity
@@ -91,7 +92,7 @@ class Teachability(AgentCapability):
         """Adds a few arbitrary memos to the DB."""
         self.memo_store.prepopulate()
 
-    def process_last_received_message(self, text: Union[dict, str]):
+    def process_last_received_message(self, text: Union[dict[str, Any], str]):
         """Appends any relevant memos to the message text, and stores any apparent teachings in new memos.
         Uses TextAnalyzerAgent to make decisions about memo storage and retrieval.
         """
@@ -106,7 +107,7 @@ class Teachability(AgentCapability):
         # Return the (possibly) expanded message text.
         return expanded_text
 
-    def _consider_memo_storage(self, comment: Union[dict, str]):
+    def _consider_memo_storage(self, comment: Union[dict[str, Any], str]):
         """Decides whether to store something from one user comment in the DB."""
         memo_added = False
 
@@ -164,7 +165,7 @@ class Teachability(AgentCapability):
             # Yes. Save them to disk.
             self.memo_store._save_memos()
 
-    def _consider_memo_retrieval(self, comment: Union[dict, str]):
+    def _consider_memo_retrieval(self, comment: Union[dict[str, Any], str]):
         """Decides whether to retrieve memos from the DB, and add them to the chat context."""
         # First, use the comment directly as the lookup key.
         if self.verbosity >= 1:
@@ -227,7 +228,7 @@ class Teachability(AgentCapability):
             memo_texts = memo_texts + "\n" + info
         return memo_texts
 
-    def _analyze(self, text_to_analyze: Union[dict, str], analysis_instructions: Union[dict, str]):
+    def _analyze(self, text_to_analyze: Union[dict[str, Any], str], analysis_instructions: Union[dict[str, Any], str]):
         """Asks TextAnalyzerAgent to analyze the given text according to specific instructions."""
         self.analyzer.reset()  # Clear the analyzer's list of messages.
         self.teachable_agent.send(

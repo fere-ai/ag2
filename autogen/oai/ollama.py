@@ -28,20 +28,40 @@ import random
 import re
 import time
 import warnings
-from typing import Any, Optional, Type
+from typing import Any, Literal, Optional, Union
 
-from openai.types.chat import ChatCompletion, ChatCompletionMessageToolCall
-from openai.types.chat.chat_completion import ChatCompletionMessage, Choice
-from openai.types.completion_usage import CompletionUsage
-from pydantic import BaseModel
+from pydantic import BaseModel, Field, HttpUrl
 
 from ..import_utils import optional_import_block, require_optional_import
+from ..llm_config import LLMConfigEntry, register_llm_config
 from .client_utils import FormatterProtocol, should_hide_tools, validate_parameter
+from .oai_models import ChatCompletion, ChatCompletionMessage, ChatCompletionMessageToolCall, Choice, CompletionUsage
 
 with optional_import_block():
     import ollama
     from fix_busted_json import repair_json
     from ollama import Client
+
+
+@register_llm_config
+class OllamaLLMConfigEntry(LLMConfigEntry):
+    api_type: Literal["ollama"] = "ollama"
+    client_host: Optional[HttpUrl] = None
+    stream: bool = False
+    num_predict: int = Field(
+        default=-1,
+        description="Maximum number of tokens to predict, note: -1 is infinite (default), -2 is fill context.",
+    )
+    num_ctx: int = Field(default=2048)
+    repeat_penalty: float = Field(default=1.1)
+    seed: int = Field(default=0)
+    temperature: float = Field(default=0.8)
+    top_k: int = Field(default=40)
+    top_p: float = Field(default=0.9)
+    hide_tools: Literal["if_all_run", "if_any_run", "never"] = "never"
+
+    def create_client(self):
+        raise NotImplementedError("OllamaLLMConfigEntry.create_client is not implemented.")
 
 
 class OllamaClient:
@@ -79,14 +99,11 @@ class OllamaClient:
     # Override using "manual_tool_call_step2" config parameter
     TOOL_CALL_MANUAL_STEP2 = " (proceed with step 2)"
 
-    def __init__(self, **kwargs):
-        """Note that no api_key or environment variable is required for Ollama.
+    def __init__(self, response_format: Optional[Union[BaseModel, dict[str, Any]]] = None, **kwargs):
+        """Note that no api_key or environment variable is required for Ollama."""
 
-        Args:
-            None
-        """
         # Store the response format, if provided (for structured outputs)
-        self._response_format: Optional[Type[BaseModel]] = None
+        self._response_format: Optional[Union[BaseModel, dict[str, Any]]] = response_format
 
     def message_retrieval(self, response) -> list:
         """Retrieve and return a list of strings or a list of Choice.Message from the response.
@@ -181,6 +198,17 @@ class OllamaClient:
         if len(options_dict) != 0:
             ollama_params["options"] = options_dict
 
+        # Structured outputs (see https://ollama.com/blog/structured-outputs)
+        if not self._response_format and params.get("response_format"):
+            self._response_format = params["response_format"]
+
+        if self._response_format:
+            if isinstance(self._response_format, dict):
+                ollama_params["format"] = self._response_format
+            else:
+                # Keep self._response_format as a Pydantic model for when process the response
+                ollama_params["format"] = self._response_format.model_json_schema()
+
         return ollama_params
 
     @require_optional_import(["ollama", "fix_busted_json"], "ollama")
@@ -232,13 +260,6 @@ class OllamaClient:
 
         ollama_params["messages"] = ollama_messages
 
-        # If response_format exists, we want structured outputs
-        # Based on:
-        # https://ollama.com/blog/structured-outputs
-        if params.get("response_format"):
-            self._response_format = params["response_format"]
-            ollama_params["format"] = params.get("response_format").model_json_schema()
-
         # Token counts will be returned
         prompt_tokens = 0
         completion_tokens = 0
@@ -246,7 +267,8 @@ class OllamaClient:
 
         ans = None
         if "client_host" in params:
-            client = Client(host=params["client_host"])
+            # Convert client_host to string from HttpUrl
+            client = Client(host=str(params["client_host"]))
             response = client.chat(**ollama_params)
         else:
             response = ollama.chat(**ollama_params)
@@ -491,8 +513,11 @@ class OllamaClient:
             return response
 
         try:
-            # Parse JSON and validate against the Pydantic model
-            return self._response_format.model_validate_json(response)
+            # Parse JSON and validate against the Pydantic model if Pydantic model was provided
+            if isinstance(self._response_format, dict):
+                return response
+            else:
+                return self._response_format.model_validate_json(response)
         except Exception as e:
             raise ValueError(f"Failed to parse response as valid JSON matching the schema for Structured Output: {e!s}")
 
@@ -505,7 +530,7 @@ def _format_json_response(response: Any, original_answer: str) -> str:
 @require_optional_import("fix_busted_json", "ollama")
 def response_to_tool_call(response_string: str) -> Any:
     """Attempts to convert the response to an object, aimed to align with function format `[{},{}]`"""
-    # We try and detect the list[dict] format:
+    # We try and detect the list[dict[str, Any]] format:
     # Pattern 1 is [{},{}]
     # Pattern 2 is {} (without the [], so could be a single function call)
     patterns = [r"\[[\s\S]*?\]", r"\{[\s\S]*\}"]
@@ -561,7 +586,7 @@ def response_to_tool_call(response_string: str) -> Any:
     return None
 
 
-def _object_to_tool_call(data_object: Any) -> list[dict]:
+def _object_to_tool_call(data_object: Any) -> list[dict[str, Any]]:
     """Attempts to convert an object to a valid tool call object List[Dict] and returns it, if it can, otherwise None"""
     # If it's a dictionary and not a list then wrap in a list
     if isinstance(data_object, dict):

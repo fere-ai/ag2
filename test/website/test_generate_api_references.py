@@ -14,12 +14,13 @@ from autogen._website.generate_api_references import (
     add_prefix,
     convert_md_to_mdx,
     create_nav_structure,
+    fix_api_reference_links,
     generate_mint_json_from_template,
     get_mdx_files,
     update_mint_json_with_api_nav,
     update_nav,
 )
-from autogen.import_utils import optional_import_block, skip_on_missing_imports
+from autogen.import_utils import optional_import_block, run_for_optional_imports
 
 with optional_import_block():
     import jinja2
@@ -109,7 +110,7 @@ def target_file(temp_dir: Path) -> Path:
     return temp_dir / "mint.json"
 
 
-@skip_on_missing_imports(["jinja2", "pdoc"], "docs")
+@run_for_optional_imports(["jinja2", "pdoc"], "docs")
 def test_generate_mint_json_from_template(template_file: Path, target_file: Path, template_content: str) -> None:
     """Test that mint.json is generated correctly from template."""
     # Run the function
@@ -126,7 +127,7 @@ def test_generate_mint_json_from_template(template_file: Path, target_file: Path
     assert actual == expected
 
 
-@skip_on_missing_imports(["jinja2", "pdoc"], "docs")
+@run_for_optional_imports(["jinja2", "pdoc"], "docs")
 def test_generate_mint_json_existing_file(template_file: Path, target_file: Path, template_content: str) -> None:
     """Test that function works when mint.json already exists."""
     # Create an existing mint.json with different content
@@ -145,7 +146,7 @@ def test_generate_mint_json_existing_file(template_file: Path, target_file: Path
     assert actual == expected
 
 
-@skip_on_missing_imports(["jinja2", "pdoc"], "docs")
+@run_for_optional_imports(["jinja2", "pdoc"], "docs")
 def test_generate_mint_json_missing_template(target_file: Path) -> None:
     """Test handling of missing template file."""
     with tempfile.TemporaryDirectory() as tmp_dir:
@@ -200,6 +201,23 @@ def test_add_prefix() -> None:
 
     # Test with multiple parent groups
     assert add_prefix("example", ["group1", "group2"]) == "docs/api-reference/group1/group2/example"
+
+
+def test_fix_api_reference_links() -> None:
+    fixtures = [
+        (
+            "which will be passed to [OpenAIWrapper.create](/docs/api-reference/autogen/OpenAIWrapper#autogen.OpenAIWrapper.create).",
+            "which will be passed to [OpenAIWrapper.create](/docs/api-reference/autogen/OpenAIWrapper#create).",
+        ),
+        (
+            "which will be passed to [ConversableAgent.a_receive](/docs/api-reference/autogen/ConversableAgent#autogen.ConversableAgent)",
+            "which will be passed to [ConversableAgent.a_receive](/docs/api-reference/autogen/ConversableAgent#ConversableAgent)",
+        ),
+    ]
+    for fixture in fixtures:
+        content, expected = fixture
+        actual = fix_api_reference_links(content)
+        assert actual == expected
 
 
 class TestCreateNavStructure:
@@ -347,7 +365,7 @@ title: autogen
 <a href="#autogen..gather_usage_summary" class="headerlink" title="Permanent link"></a>
 
 ```python
-gather_usage_summary(agents: list[autogen.Agent]) -> dict[dict[str, dict], dict[str, dict]]
+gather_usage_summary(agents: list[autogen.Agent]) -> dict[dict[str, dict[str, Any]], dict[str, dict[str, Any]]]
 ```
 
     Gather usage summary from all agents.
@@ -360,7 +378,7 @@ gather_usage_summary(agents: list[autogen.Agent]) -> dict[dict[str, dict], di
 <b>Returns:</b>
 | Type | Description |
 |--|--|
-| `dict[dict[str, dict], dict[str, dict]]` | dictionary: A dictionary containing two keys: - "usage_including_cached_inference": Cost information on the total usage, including the tokens in cached inference. - "usage_excluding_cached_inference": Cost information on the usage of tokens, excluding the tokens in cache. No larger than "usage_including_cached_inference". Example: ```python \\{ "usage_including_cached_inference": \\{ "total_cost": 0.0006090000000000001, "gpt-35-turbo": \\{ "cost": 0.0006090000000000001, "prompt_tokens": 242, "completion_tokens": 123, "total_tokens": 365, }, }, "usage_excluding_cached_inference": \\{ "total_cost": 0.0006090000000000001, "gpt-35-turbo": \\{ "cost": 0.0006090000000000001, "prompt_tokens": 242, "completion_tokens": 123, "total_tokens": 365, }, }, } ``` |
+| `dict[dict[str, dict[str, Any]], dict[str, dict[str, Any]]]` | dictionary: A dictionary containing two keys: - "usage_including_cached_inference": Cost information on the total usage, including the tokens in cached inference. - "usage_excluding_cached_inference": Cost information on the usage of tokens, excluding the tokens in cache. No larger than "usage_including_cached_inference". Example: ```python \\{ "usage_including_cached_inference": \\{ "total_cost": 0.0006090000000000001, "gpt-35-turbo": \\{ "cost": 0.0006090000000000001, "prompt_tokens": 242, "completion_tokens": 123, "total_tokens": 365, }, }, "usage_excluding_cached_inference": \\{ "total_cost": 0.0006090000000000001, "gpt-35-turbo": \\{ "cost": 0.0006090000000000001, "prompt_tokens": 242, "completion_tokens": 123, "total_tokens": 365, }, }, } ``` |
 
 <br />
 
@@ -387,7 +405,7 @@ config_list_from_dotenv(
 <b>Returns:</b>
 | Type | Description |
 |--|--|
-| `list[dict[str, str \\| set[str]]]` | List[Dict[str, Union[str, Set[str]]]]: A list of configuration dictionaries for each model. |
+| `list[dict[str, str \\| set[str]]]` | list[dict[str, Union[str, Set[str]]]]: A list of configuration dictionaries for each model. |
 
 <br />
 
@@ -406,7 +424,7 @@ config_list_from_dotenv(
 ConversableAgent(
     name: str,
     system_message: str | list | None = 'You are a helpful AI Assistant.',
-    is_termination_msg: Callable[[dict], bool] | None = None,
+    is_termination_msg: Callable[[dict[str, Any]], bool] | None = None,
 )
 ```
 
@@ -417,7 +435,7 @@ ConversableAgent(
 |--|--|
 | `name` | name of the agent.<br/><br/>**Type:** `str` |
 | `system_message` | system message for the ChatCompletion inference.<br/><br/>**Type:** `str \\| list \\| None`<br/><br/>**Default:** 'You are a helpful AI Assistant.' |
-| `is_termination_msg` | a function that takes a message in the form of a dictionary and returns a boolean value indicating if this received message is a termination message.<br/><br/>The dict can contain the following keys: "content", "role", "name", "function_call".<br/><br/>**Type:** `Callable[[dict], bool] \\| None`<br/><br/>**Default:** None |
+| `is_termination_msg` | a function that takes a message in the form of a dictionary and returns a boolean value indicating if this received message is a termination message.<br/><br/>The dict can contain the following keys: "content", "role", "name", "function_call".<br/><br/>**Type:** `Callable[[dict[str, Any]], bool] \\| None`<br/><br/>**Default:** None |
 
 ### Class Attributes
 
@@ -456,7 +474,7 @@ ConversableAgent(
 ```python
 a_check_termination_and_human_reply(
     self,
-    messages: list[dict] | None = None,
+    messages: list[dict[str, Any]] | None = None,
 ) -> tuple[bool, str | None]
 ```
 
@@ -465,12 +483,12 @@ a_check_termination_and_human_reply(
 <b>Parameters:</b>
 | Name | Description |
 |--|--|
-| `messages` | A list of message dictionaries, representing the conversation history.<br/><br/>**Type:** `list[dict] \\| None`<br/><br/>**Default:** None |
+| `messages` | A list of message dictionaries, representing the conversation history.<br/><br/>**Type:** `list[dict[str, Any]] \\| None`<br/><br/>**Default:** None |
 
 <b>Returns:</b>
 | Type | Description |
 |--|--|
-| `tuple[bool, str \\| None]` | Tuple[bool, Union[str, Dict, None]]: A tuple containing a boolean indicating if the conversation should be terminated, and a human reply which can be a string, a dictionary, or None. |
+| `tuple[bool, str \\| None]` | tuple[bool, Union[str, dict, None]]: A tuple containing a boolean indicating if the conversation should be terminated, and a human reply which can be a string, a dictionary, or None. |
 
 <br />
 
@@ -506,7 +524,7 @@ a_execute_function(
 ```python
 a_generate_function_call_reply(
     self,
-    messages: list[dict] | None = None,
+    messages: list[dict[str, Any]] | None = None,
 ) -> tuple[bool, dict | None]
 ```
 
@@ -515,7 +533,7 @@ a_generate_function_call_reply(
 <b>Parameters:</b>
 | Name | Description |
 |--|--|
-| `messages` | **Type:** `list[dict] \\| None`<br/><br/>**Default:** None |
+| `messages` | **Type:** `list[dict[str, Any]] \\| None`<br/><br/>**Default:** None |
 
 <br />
 **** SYMBOL_END ****
@@ -580,13 +598,9 @@ MyClass(
             "agentchat/overview.md",
         ]
 
-    @skip_on_missing_imports(["jinja2", "pdoc"], "docs")
+    @run_for_optional_imports(["jinja2", "pdoc"], "docs")
     def test_split_reference_by_symbols(self, api_dir: Path, expected_files: list[str]) -> None:
         """Test that files are split correctly."""
-        all_files_relative_to_api_dir = [str(p.relative_to(api_dir)) for p in api_dir.rglob("*.md")]
-        print("*" * 80)
-        print(f"{all_files_relative_to_api_dir=}")
-
         symbol_files_generator = SplitReferenceFilesBySymbols(api_dir)
         symbol_files_generator.generate()
 

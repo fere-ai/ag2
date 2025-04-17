@@ -6,18 +6,22 @@ import json
 from collections.abc import AsyncGenerator
 from contextlib import asynccontextmanager
 from logging import Logger, getLogger
-from typing import TYPE_CHECKING, Any, Callable, List, Optional
+from typing import TYPE_CHECKING, Any, Callable, Optional, Union
 
-import httpx
+from autogen.import_utils import optional_import_block, require_optional_import
 
 from ......doc_utils import export_module
+from ......llm_config import LLMConfig
 from ...realtime_events import RealtimeEvent
-from ..realtime_client import Role, register_realtime_client
+from ..realtime_client import RealtimeClientBase, Role, register_realtime_client
 from .utils import parse_oai_message
 
 if TYPE_CHECKING:
     from ...websockets import WebSocketProtocol as WebSocket
     from ..realtime_client import RealtimeClientProtocol
+
+with optional_import_block():
+    import httpx
 
 __all__ = ["OpenAIRealtimeWebRTCClient"]
 
@@ -25,22 +29,26 @@ global_logger = getLogger(__name__)
 
 
 @register_realtime_client()
+@require_optional_import("httpx", "openai-realtime", except_for="get_factory")
 @export_module("autogen.agentchat.realtime.experimental.clients.oai")
-class OpenAIRealtimeWebRTCClient:
+class OpenAIRealtimeWebRTCClient(RealtimeClientBase):
     """(Experimental) Client for OpenAI Realtime API that uses WebRTC protocol."""
 
     def __init__(
         self,
         *,
-        llm_config: dict[str, Any],
+        llm_config: Union[LLMConfig, dict[str, Any]],
         websocket: "WebSocket",
         logger: Optional[Logger] = None,
     ) -> None:
         """(Experimental) Client for OpenAI Realtime API.
 
         Args:
-            llm_config (dict[str, Any]): The config for the client.
+            llm_config: The config for the client.
+            websocket: the websocket to use for the connection
+            logger: the logger to use for logging events
         """
+        super().__init__()
         self._llm_config = llm_config
         self._logger = logger
         self._websocket = websocket
@@ -94,11 +102,12 @@ class OpenAIRealtimeWebRTCClient:
 
     async def send_audio(self, audio: str) -> None:
         """Send audio to the OpenAI Realtime API.
+        in case of WebRTC, audio is already sent by js client, so we just queue it in order to be logged.
 
         Args:
             audio (str): The audio to send.
         """
-        await self._websocket.send_json({"type": "input_audio_buffer.append", "audio": audio})
+        await self.queue_input_audio_buffer_delta(audio)
 
     async def truncate_audio(self, audio_end_ms: int, content_index: int, item_id: str) -> None:
         """Truncate audio in the OpenAI Realtime API.
@@ -131,7 +140,7 @@ class OpenAIRealtimeWebRTCClient:
         await self._websocket.send_json({"type": "session.update", "session": session_options})
         logger.info("Sending session update finished")
 
-    def session_init_data(self) -> List[dict[str, Any]]:
+    def session_init_data(self) -> list[dict[str, Any]]:
         """Control initial session with OpenAI."""
         session_update = {
             "turn_detection": {"type": "server_vad"},
@@ -176,7 +185,12 @@ class OpenAIRealtimeWebRTCClient:
             pass
 
     async def read_events(self) -> AsyncGenerator[RealtimeEvent, None]:
-        """Read messages from the OpenAI Realtime API.
+        """Read events from the OpenAI Realtime API."""
+        async for event in self._read_events():
+            yield event
+
+    async def _read_from_connection(self) -> AsyncGenerator[RealtimeEvent, None]:
+        """Read messages from the OpenAI Realtime API connection.
         Again, in case of WebRTC, we do not read OpenAI messages directly since we
         do not hold connection to OpenAI. Instead we read messages from the websocket, and javascript
         client on the other side of the websocket that is connected to OpenAI is relaying events to us.
@@ -187,7 +201,8 @@ class OpenAIRealtimeWebRTCClient:
                 message = json.loads(message_json)
                 for event in self._parse_message(message):
                     yield event
-            except Exception:
+            except Exception as e:
+                self.logger.exception(f"Error reading from connection {e}")
                 break
 
     def _parse_message(self, message: dict[str, Any]) -> list[RealtimeEvent]:
@@ -203,15 +218,14 @@ class OpenAIRealtimeWebRTCClient:
 
     @classmethod
     def get_factory(
-        cls, llm_config: dict[str, Any], logger: Logger, **kwargs: Any
+        cls, llm_config: Union[LLMConfig, dict[str, Any]], logger: Logger, **kwargs: Any
     ) -> Optional[Callable[[], "RealtimeClientProtocol"]]:
         """Create a Realtime API client.
 
         Args:
-            model (str): The model to create the client for.
-            voice (str): The voice to use.
-            system_message (str): The system message to use.
-            kwargs (Any): Additional arguments.
+            llm_config: The config for the client.
+            logger: The logger to use for logging events.
+            **kwargs: Additional arguments.
 
         Returns:
             RealtimeClientProtocol: The Realtime API client is returned if the model matches the pattern

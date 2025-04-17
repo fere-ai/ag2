@@ -10,7 +10,7 @@ import os
 import re
 from io import BytesIO
 from math import ceil
-from typing import Union
+from typing import Any, Union
 
 import requests
 
@@ -193,15 +193,15 @@ def convert_base64_to_data_uri(base64_image):
 
 
 @require_optional_import("PIL", "unknown")
-def gpt4v_formatter(prompt: str, img_format: str = "uri") -> list[Union[str, dict]]:
+def gpt4v_formatter(prompt: str, img_format: str = "uri") -> list[Union[str, dict[str, Any]]]:
     """Formats the input prompt by replacing image tags and returns a list of text and images.
 
     Args:
-        - prompt (str): The input string that may contain image tags like `<img ...>`.
-        - img_format (str): what image format should be used. One of "uri", "url", "pil".
+        prompt (str): The input string that may contain image tags like `<img ...>`.
+        img_format (str): what image format should be used. One of "uri", "url", "pil".
 
     Returns:
-        - List[Union[str, dict]]: A list of alternating text and image dictionary items.
+        List[Union[str, dict[str, Any]]]: A list of alternating text and image dictionary items.
     """
     assert img_format in ["uri", "url", "pil"]
 
@@ -277,7 +277,7 @@ def _to_pil(data: str) -> "Image.Image":
 
 
 @require_optional_import("PIL", "unknown")
-def message_formatter_pil_to_b64(messages: list[dict]) -> list[dict]:
+def message_formatter_pil_to_b64(messages: list[dict[str, Any]]) -> list[dict[str, Any]]:
     """Converts the PIL image URLs in the messages to base64 encoded data URIs.
 
     This function iterates over a list of message dictionaries. For each message,
@@ -345,9 +345,9 @@ def num_tokens_from_gpt_image(
     Reference: https://openai.com/api/pricing/
 
     Args:
-        image_data : Union[str, Image.Image]: The image data which can either be a base64
-           encoded string, a URL, a file path, or a PIL Image object.
+        image_data : Union[str, Image.Image]: The image data which can either be a base64 encoded string, a URL, a file path, or a PIL Image object.
         model: str: The model being used for image processing. Can be "gpt-4-vision", "gpt-4o", or "gpt-4o-mini".
+        low_quality: bool: Whether to use low-quality processing. Defaults to False.
 
     Returns:
         int: The total number of tokens required for processing the image.

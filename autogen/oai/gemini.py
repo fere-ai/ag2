@@ -40,6 +40,7 @@ Resources:
 
 from __future__ import annotations
 
+import asyncio
 import base64
 import copy
 import json
@@ -50,20 +51,21 @@ import re
 import time
 import warnings
 from io import BytesIO
-from typing import Any, Optional, Type
+from typing import Any, Literal, Optional, Type, Union
 
 import requests
-from openai.types.chat import ChatCompletion, ChatCompletionMessageToolCall
-from openai.types.chat.chat_completion import ChatCompletionMessage, Choice
-from openai.types.completion_usage import CompletionUsage
-from pydantic import BaseModel
+from packaging import version
+from pydantic import BaseModel, Field
 
 from ..import_utils import optional_import_block, require_optional_import
+from ..json_utils import resolve_json_references
+from ..llm_config import LLMConfigEntry, register_llm_config
 from .client_utils import FormatterProtocol
+from .gemini_types import ToolConfig
+from .oai_models import ChatCompletion, ChatCompletionMessage, ChatCompletionMessageToolCall, Choice, CompletionUsage
 
 with optional_import_block():
     import google.genai as genai
-    import jsonref
     import vertexai
     from PIL import Image
     from google.auth.credentials import Credentials
@@ -74,6 +76,7 @@ with optional_import_block():
         FunctionResponse,
         GenerateContentConfig,
         GenerateContentResponse,
+        GoogleSearch,
         Part,
         Schema,
         Tool,
@@ -97,7 +100,25 @@ with optional_import_block():
 logger = logging.getLogger(__name__)
 
 
-@require_optional_import(["google", "vertexai", "PIL", "jsonschema", "jsonref"], "gemini")
+@register_llm_config
+class GeminiLLMConfigEntry(LLMConfigEntry):
+    api_type: Literal["google"] = "google"
+    project_id: Optional[str] = None
+    location: Optional[str] = None
+    # google_application_credentials points to the path of the JSON Keyfile
+    google_application_credentials: Optional[str] = None
+    # credentials is a google.auth.credentials.Credentials object
+    credentials: Optional[Union[Any, str]] = None
+    stream: bool = False
+    safety_settings: Optional[Union[list[dict[str, Any]], dict[str, Any]]] = None
+    price: Optional[list[float]] = Field(default=None, min_length=2, max_length=2)
+    tool_config: Optional[ToolConfig] = None
+
+    def create_client(self):
+        raise NotImplementedError("GeminiLLMConfigEntry.create_client() is not implemented.")
+
+
+@require_optional_import(["google", "vertexai", "PIL", "jsonschema"], "gemini")
 class GeminiClient:
     """Client for Google's Gemini API."""
 
@@ -139,14 +160,7 @@ class GeminiClient:
         like in Google Cloud Shell.
 
         Args:
-            api_key (str): The API key for using Gemini.
-                credentials (google.auth.credentials.Credentials): credentials to be used for authentication with vertexai.
-            google_application_credentials (str): Path to the JSON service account key file of the service account.
-                Alternatively, the GOOGLE_APPLICATION_CREDENTIALS environment variable
-                can also be set instead of using this argument.
-            project_id (str): Google Cloud project id, which is only valid in case no API key is specified.
-            location (str): Compute region to be used, like 'us-west1'.
-                This parameter is only valid in case no API key is specified.
+            **kwargs: The keyword arguments to initialize the Gemini client.
         """
         self.api_key = kwargs.get("api_key")
         if not self.api_key:
@@ -163,8 +177,10 @@ class GeminiClient:
                 "Google Cloud project and compute location cannot be set when using an API Key!"
             )
 
+        self.api_version = kwargs.get("api_version")
+
         # Store the response format, if provided (for structured outputs)
-        self._response_format: Optional[Type[BaseModel]] = None
+        self._response_format: Optional[type[BaseModel]] = None
 
     def message_retrieval(self, response) -> list:
         """Retrieve and return a list of strings or a list of Choice.Message from the response.
@@ -190,6 +206,17 @@ class GeminiClient:
         }
 
     def create(self, params: dict) -> ChatCompletion:
+        # When running in async context via run_in_executor from ConversableAgent.a_generate_oai_reply,
+        # this method runs in a new thread that doesn't have an event loop by default. The Google Genai
+        # client requires an event loop even for synchronous operations, so we need to ensure one exists.
+        try:
+            asyncio.get_running_loop()
+        except RuntimeError:
+            # No event loop exists in this thread (which happens when called from an executor)
+            # Create a new event loop for this thread to satisfy Genai client requirements
+            loop = asyncio.new_event_loop()
+            asyncio.set_event_loop(loop)
+
         if self.use_vertexai:
             self._initialize_vertexai(**params)
         else:
@@ -210,12 +237,14 @@ class GeminiClient:
             )
 
         params.get("api_type", "google")  # not used
+        http_options = {"api_version": self.api_version} if self.api_version else None
         messages = params.get("messages", [])
         stream = params.get("stream", False)
         n_response = params.get("n", 1)
-        system_instruction = params.get("system_instruction")
+        system_instruction = self._extract_system_instruction(messages)
         response_validation = params.get("response_validation", True)
         tools = self._tools_to_gemini_tools(params["tools"]) if "tools" in params else None
+        tool_config = params.get("tool_config")
 
         generation_config = {
             gemini_term: params[autogen_term]
@@ -249,7 +278,12 @@ class GeminiClient:
             self._response_format = params.get("response_format")
             generation_config["response_mime_type"] = "application/json"
 
-            response_schema = dict(jsonref.replace_refs(params.get("response_format").model_json_schema()))
+            response_format_schema_raw = params.get("response_format")
+
+            if isinstance(response_format_schema_raw, dict):
+                response_schema = resolve_json_references(response_format_schema_raw)
+            else:
+                response_schema = resolve_json_references(params.get("response_format").model_json_schema())
             if "$defs" in response_schema:
                 response_schema.pop("$defs")
             generation_config["response_schema"] = response_schema
@@ -262,17 +296,19 @@ class GeminiClient:
                 generation_config=GenerationConfig(**generation_config),
                 safety_settings=safety_settings,
                 system_instruction=system_instruction,
+                tool_config=tool_config,
                 tools=tools,
             )
 
             chat = model.start_chat(history=gemini_messages[:-1], response_validation=response_validation)
             response = chat.send_message(gemini_messages[-1].parts, stream=stream, safety_settings=safety_settings)
         else:
-            client = genai.Client(api_key=self.api_key)
+            client = genai.Client(api_key=self.api_key, http_options=http_options)
             generate_content_config = GenerateContentConfig(
                 safety_settings=safety_settings,
                 system_instruction=system_instruction,
                 tools=tools,
+                tool_config=tool_config,
                 **generation_config,
             )
             chat = client.chats.create(model=model_name, config=generate_content_config, history=gemini_messages[:-1])
@@ -367,8 +403,23 @@ class GeminiClient:
 
         return response_oai
 
-    def _oai_content_to_gemini_content(self, message: dict[str, Any]) -> tuple[list, str]:
-        """Convert AutoGen content to Gemini parts, catering for text and tool calls"""
+    def _extract_system_instruction(self, messages: list[dict]) -> str | None:
+        """Extract system instruction if provided."""
+        if messages is None or len(messages) == 0 or messages[0].get("role") != "system":
+            return None
+
+        message = messages.pop(0)
+        content = message["content"]
+
+        # Multi-model uses a list of dictionaries as content with text for the system message
+        # Otherwise normal agents will have strings as content
+        content = content[0].get("text", "").strip() if isinstance(content, list) else content.strip()
+
+        content = content if len(content) > 0 else None
+        return content
+
+    def _oai_content_to_gemini_content(self, message: dict[str, Any]) -> tuple[list[Any], str]:
+        """Convert AG2 content to Gemini parts, catering for text and tool calls"""
         rst = []
 
         if "role" in message and message["role"] == "tool":
@@ -505,10 +556,11 @@ class GeminiClient:
                     else rst.append(Content(parts=parts, role=role))
                 )
             elif part_type == "tool" or part_type == "tool_call":
+                role = "function" if version.parse(genai.__version__) < version.parse("1.4.0") else "user"
                 rst.append(
-                    VertexAIContent(parts=parts, role="function")
+                    VertexAIContent(parts=parts, role=role)
                     if self.use_vertexai
-                    else rst.append(Content(parts=parts, role="function"))
+                    else rst.append(Content(parts=parts, role=role))
                 )
             elif part_type == "image":
                 # Image has multiple parts, some can be text and some can be image based
@@ -542,10 +594,21 @@ class GeminiClient:
                 rst.pop()
 
         # The Gemini is restrict on order of roles, such that
-        # 1. The messages should be interleaved between user and model.
+        # 1. The first message must be from the user role.
         # 2. The last message must be from the user role.
+        # 3. The messages should be interleaved between user and model.
+        # We add a dummy message "start chat" if the first role is not the user.
         # We add a dummy message "continue" if the last role is not the user.
-        if rst[-1].role not in ["user", "function"]:
+        if rst[0].role != "user":
+            text_part, _ = self._oai_content_to_gemini_content({"content": "start chat"})
+            rst.insert(
+                0,
+                VertexAIContent(parts=text_part, role="user")
+                if self.use_vertexai
+                else Content(parts=text_part, role="user"),
+            )
+
+        if rst[-1].role != "user":
             text_part, _ = self._oai_content_to_gemini_content({"content": "continue"})
             rst.append(
                 VertexAIContent(parts=text_part, role="user")
@@ -568,9 +631,12 @@ class GeminiClient:
             return response
 
         try:
-            # Parse JSON and validate against the Pydantic model
+            # Parse JSON and validate against the Pydantic model if Pydantic model was provided
             json_data = json.loads(response)
-            return self._response_format.model_validate(json_data)
+            if isinstance(self._response_format, dict):
+                return json_data
+            else:
+                return self._response_format.model_validate(json_data)
         except Exception as e:
             raise ValueError(f"Failed to parse response as valid JSON matching the schema for Structured Output: {e!s}")
 
@@ -590,18 +656,52 @@ class GeminiClient:
             return [GeminiClient._convert_type_null_to_nullable(item) for item in schema]
         return schema
 
+    @staticmethod
+    def _check_if_prebuilt_google_search_tool_exists(tools: list[dict[str, Any]]) -> bool:
+        """Check if the Google Search tool is present in the tools list."""
+        exists = False
+        for tool in tools:
+            if tool["function"]["name"] == "prebuilt_google_search":
+                exists = True
+                break
+
+        if exists and len(tools) > 1:
+            raise ValueError(
+                "Google Search tool can be used only by itself. Please remove other tools from the tools list."
+            )
+
+        return exists
+
+    @staticmethod
+    def _unwrap_references(function_parameters: dict[str, Any]) -> dict[str, Any]:
+        if "properties" not in function_parameters:
+            return function_parameters
+
+        function_parameters_copy = copy.deepcopy(function_parameters)
+
+        for property_name, property_value in function_parameters["properties"].items():
+            if "$defs" in property_value:
+                function_parameters_copy["properties"][property_name] = resolve_json_references(property_value)
+                function_parameters_copy["properties"][property_name].pop("$defs")
+
+        return function_parameters_copy
+
     def _tools_to_gemini_tools(self, tools: list[dict[str, Any]]) -> list[Tool]:
         """Create Gemini tools (as typically requires Callables)"""
+        if self._check_if_prebuilt_google_search_tool_exists(tools) and not self.use_vertexai:
+            return [Tool(google_search=GoogleSearch())]
+
         functions = []
         for tool in tools:
             if self.use_vertexai:
                 tool["function"]["parameters"] = GeminiClient._convert_type_null_to_nullable(
                     tool["function"]["parameters"]
                 )
+                function_parameters = GeminiClient._unwrap_references(tool["function"]["parameters"])
                 function = vaiFunctionDeclaration(
                     name=tool["function"]["name"],
                     description=tool["function"]["description"],
-                    parameters=tool["function"]["parameters"],
+                    parameters=function_parameters,
                 )
             else:
                 function = GeminiClient._create_gemini_function_declaration(tool)
@@ -678,8 +778,12 @@ class GeminiClient:
     @staticmethod
     def _create_gemini_function_parameters(function_parameter: dict[str, any]) -> dict[str, any]:
         """Convert function parameters to Gemini format, recursive"""
+        function_parameter = GeminiClient._unwrap_references(function_parameter)
+
         if "type" in function_parameter:
             function_parameter["type"] = function_parameter["type"].upper()
+            # If the schema was created from pydantic BaseModel, it will "title" attribute which needs to be removed
+            function_parameter.pop("title", None)
 
         # Parameter properties and items
         if "properties" in function_parameter:
@@ -774,7 +878,13 @@ def calculate_gemini_cost(use_vertexai: bool, input_tokens: int, output_tokens: 
         # Vertex AI pricing - based on Text input
         # https://cloud.google.com/vertex-ai/generative-ai/pricing#vertex-ai-pricing
 
-        if "gemini-1.5-flash" in model_name:
+        if "gemini-2.0-flash-lite" in model_name:
+            return total_cost_mil(0.075, 0.3)
+
+        elif "gemini-2.0-flash" in model_name:
+            return total_cost_mil(0.15, 0.6)
+
+        elif "gemini-1.5-flash" in model_name:
             if up_to_128k:
                 return total_cost_k(0.00001875, 0.000075)
             else:
@@ -799,7 +909,15 @@ def calculate_gemini_cost(use_vertexai: bool, input_tokens: int, output_tokens: 
     else:
         # Non-Vertex AI pricing
 
-        if "gemini-1.5-flash-8b" in model_name:
+        if "gemini-2.0-flash-lite" in model_name:
+            # https://ai.google.dev/gemini-api/docs/pricing#gemini-2.0-flash-lite
+            return total_cost_mil(0.075, 0.3)
+
+        elif "gemini-2.0-flash" in model_name:
+            # https://ai.google.dev/gemini-api/docs/pricing#gemini-2.0-flash
+            return total_cost_mil(0.1, 0.4)
+
+        elif "gemini-1.5-flash-8b" in model_name:
             # https://ai.google.dev/pricing#1_5flash-8B
             if up_to_128k:
                 return total_cost_mil(0.0375, 0.15)

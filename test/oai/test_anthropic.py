@@ -6,17 +6,15 @@
 # SPDX-License-Identifier: MIT
 # !/usr/bin/env python3 -m pytest
 
-
 import pytest
 
-from autogen.import_utils import optional_import_block, skip_on_missing_imports
-from autogen.oai.anthropic import AnthropicClient, _calculate_cost
+from autogen.import_utils import optional_import_block, run_for_optional_imports
+from autogen.llm_config import LLMConfig
+from autogen.oai.anthropic import AnthropicClient, AnthropicLLMConfigEntry, _calculate_cost
 
 with optional_import_block() as result:
     from anthropic.types import Message, TextBlock
 
-
-from typing import List
 
 from pydantic import BaseModel
 from typing_extensions import Literal
@@ -51,7 +49,37 @@ def anthropic_client():
     return AnthropicClient(api_key="dummy_api_key")
 
 
-@skip_on_missing_imports(["anthropic"], "anthropic")
+def test_anthropic_llm_config_entry():
+    anthropic_llm_config = AnthropicLLMConfigEntry(
+        model="claude-3-5-sonnet-latest",
+        api_key="dummy_api_key",
+        stream=False,
+        temperature=1.0,
+        top_p=0.8,
+        max_tokens=100,
+    )
+    expected = {
+        "api_type": "anthropic",
+        "model": "claude-3-5-sonnet-latest",
+        "api_key": "dummy_api_key",
+        "stream": False,
+        "temperature": 1.0,
+        "top_p": 0.8,
+        "max_tokens": 100,
+        "tags": [],
+    }
+    actual = anthropic_llm_config.model_dump()
+    assert actual == expected, actual
+
+    llm_config = LLMConfig(
+        config_list=[anthropic_llm_config],
+    )
+    assert llm_config.model_dump() == {
+        "config_list": [expected],
+    }
+
+
+@run_for_optional_imports(["anthropic"], "anthropic")
 def test_initialization_missing_api_key(monkeypatch):
     monkeypatch.delenv("ANTHROPIC_API_KEY", raising=False)
     monkeypatch.delenv("AWS_ACCESS_KEY", raising=False)
@@ -83,12 +111,12 @@ def anthropic_client_with_vertexai_credentials():
     )
 
 
-@skip_on_missing_imports(["anthropic"], "anthropic")
+@run_for_optional_imports(["anthropic"], "anthropic")
 def test_intialization(anthropic_client):
     assert anthropic_client.api_key == "dummy_api_key", "`api_key` should be correctly set in the config"
 
 
-@skip_on_missing_imports(["anthropic"], "anthropic")
+@run_for_optional_imports(["anthropic"], "anthropic")
 def test_intialization_with_aws_credentials(anthropic_client_with_aws_credentials):
     assert anthropic_client_with_aws_credentials.aws_access_key == "dummy_access_key", (
         "`aws_access_key` should be correctly set in the config"
@@ -104,7 +132,7 @@ def test_intialization_with_aws_credentials(anthropic_client_with_aws_credential
     )
 
 
-@skip_on_missing_imports(["anthropic"], "anthropic")
+@run_for_optional_imports(["anthropic"], "anthropic")
 def test_initialization_with_vertexai_credentials(anthropic_client_with_vertexai_credentials):
     assert anthropic_client_with_vertexai_credentials.gcp_project_id == "dummy_project_id", (
         "`gcp_project_id` should be correctly set in the config"
@@ -118,7 +146,7 @@ def test_initialization_with_vertexai_credentials(anthropic_client_with_vertexai
 
 
 # Test cost calculation
-@skip_on_missing_imports(["anthropic"], "anthropic")
+@run_for_optional_imports(["anthropic"], "anthropic")
 def test_cost_calculation(mock_completion):
     completion = mock_completion(
         completion="Hi! My name is Claude.",
@@ -131,7 +159,7 @@ def test_cost_calculation(mock_completion):
     ), "Cost should be $0.002025"
 
 
-@skip_on_missing_imports(["anthropic"], "anthropic")
+@run_for_optional_imports(["anthropic"], "anthropic")
 def test_load_config(anthropic_client):
     params = {
         "model": "claude-3-5-sonnet-latest",
@@ -148,12 +176,13 @@ def test_load_config(anthropic_client):
         "max_tokens": 100,
         "stop_sequences": None,
         "top_k": None,
+        "tool_choice": None,
     }
     result = anthropic_client.load_config(params)
     assert result == expected_params, "Config should be correctly loaded"
 
 
-@skip_on_missing_imports(["anthropic"], "anthropic")
+@run_for_optional_imports(["anthropic"], "anthropic")
 def test_extract_json_response(anthropic_client):
     # Define test Pydantic model
     class Step(BaseModel):
@@ -161,7 +190,7 @@ def test_extract_json_response(anthropic_client):
         output: str
 
     class MathReasoning(BaseModel):
-        steps: List[Step]
+        steps: list[Step]
         final_answer: str
 
     # Set up the response format
@@ -265,3 +294,153 @@ def test_extract_json_response(anthropic_client):
 
     with pytest.raises(ValueError, match="No valid JSON found in response for Structured Output."):
         anthropic_client._extract_json_response(no_json_response)
+
+
+@run_for_optional_imports(["anthropic"], "anthropic")
+def test_convert_tools_to_functions(anthropic_client):
+    tools = [
+        {
+            "type": "function",
+            "function": {
+                "description": "weather tool",
+                "name": "weather_tool",
+                "parameters": {
+                    "type": "object",
+                    "properties": {
+                        "city_name": {"type": "string", "description": "city_name"},
+                        "city_list": {
+                            "$defs": {
+                                "city_list_class": {
+                                    "properties": {
+                                        "item1": {"title": "Item1", "type": "string"},
+                                        "item2": {"title": "Item2", "type": "string"},
+                                    },
+                                    "required": ["item1", "item2"],
+                                    "title": "city_list_class",
+                                    "type": "object",
+                                }
+                            },
+                            "items": {"$ref": "#/$defs/city_list_class"},
+                            "type": "array",
+                            "description": "city_list",
+                        },
+                    },
+                    "required": ["city_name", "city_list"],
+                },
+            },
+        }
+    ]
+    expected = [
+        {
+            "description": "weather tool",
+            "name": "weather_tool",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "city_name": {"type": "string", "description": "city_name"},
+                    "city_list": {
+                        "$defs": {
+                            "city_list_class": {
+                                "properties": {
+                                    "item1": {"title": "Item1", "type": "string"},
+                                    "item2": {"title": "Item2", "type": "string"},
+                                },
+                                "required": ["item1", "item2"],
+                                "title": "city_list_class",
+                                "type": "object",
+                            }
+                        },
+                        "items": {"$ref": "#/properties/city_list/$defs/city_list_class"},
+                        "type": "array",
+                        "description": "city_list",
+                    },
+                },
+                "required": ["city_name", "city_list"],
+            },
+        }
+    ]
+    actual = anthropic_client.convert_tools_to_functions(tools=tools)
+    assert actual == expected
+
+
+@run_for_optional_imports(["anthropic"], "anthropic")
+def test_process_image_content_valid_data_url():
+    from autogen.oai.anthropic import process_image_content
+
+    content_item = {"type": "image_url", "image_url": {"url": "data:image/png;base64,AAA"}}
+    processed = process_image_content(content_item)
+    expected = {"type": "image", "source": {"type": "base64", "media_type": "image/png", "data": "AAA"}}
+    assert processed == expected
+
+
+@run_for_optional_imports(["anthropic"], "anthropic")
+def test_process_image_content_non_image_type():
+    from autogen.oai.anthropic import process_image_content
+
+    content_item = {"type": "text", "text": "Just text"}
+    processed = process_image_content(content_item)
+    assert processed == content_item
+
+
+@run_for_optional_imports(["anthropic"], "anthropic")
+def test_process_message_content_string():
+    from autogen.oai.anthropic import process_message_content
+
+    message = {"content": "Hello"}
+    processed = process_message_content(message)
+    assert processed == "Hello"
+
+
+@run_for_optional_imports(["anthropic"], "anthropic")
+def test_process_message_content_list():
+    from autogen.oai.anthropic import process_message_content
+
+    message = {
+        "content": [
+            {"type": "text", "text": "Hello"},
+            {"type": "image_url", "image_url": {"url": "data:image/png;base64,AAA"}},
+        ]
+    }
+    processed = process_message_content(message)
+    expected = [
+        {"type": "text", "text": "Hello"},
+        {"type": "image", "source": {"type": "base64", "media_type": "image/png", "data": "AAA"}},
+    ]
+    assert processed == expected
+
+
+@run_for_optional_imports(["anthropic"], "anthropic")
+def test_oai_messages_to_anthropic_messages():
+    from autogen.oai.anthropic import oai_messages_to_anthropic_messages
+
+    params = {
+        "messages": [
+            {
+                "role": "system",
+                "content": [
+                    {"type": "text", "text": "System text."},
+                    {"type": "image_url", "image_url": {"url": "data:image/png;base64,AAA"}},
+                ],
+            },
+            {
+                "role": "user",
+                "content": [
+                    {"type": "text", "text": "Hello"},
+                    {"type": "image_url", "image_url": {"url": "data:image/jpeg;base64,BBB"}},
+                ],
+            },
+        ]
+    }
+    processed = oai_messages_to_anthropic_messages(params)
+
+    # The function should update the system message (in the params dict) by concatenating only its text parts.
+    assert params.get("system") == "System text."
+
+    # The processed messages list should include a user message with the image URL converted to a base64 image format.
+    user_message = next((m for m in processed if m["role"] == "user"), None)
+    expected_content = [
+        {"type": "text", "text": "Hello"},
+        {"type": "image", "source": {"type": "base64", "media_type": "image/jpeg", "data": "BBB"}},
+    ]
+    assert user_message is not None
+    assert user_message["content"] == expected_content

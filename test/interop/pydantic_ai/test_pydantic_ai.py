@@ -10,7 +10,7 @@ import pytest
 from pydantic import BaseModel
 
 from autogen import AssistantAgent, UserProxyAgent
-from autogen.import_utils import optional_import_block, skip_on_missing_imports
+from autogen.import_utils import optional_import_block, run_for_optional_imports
 from autogen.interop import Interoperable
 from autogen.interop.pydantic_ai import PydanticAIInteroperability
 
@@ -24,7 +24,7 @@ with optional_import_block():
 
 
 @pytest.mark.interop
-@skip_on_missing_imports("pydantic_ai", "interop-pydantic-ai")
+@run_for_optional_imports("pydantic_ai", "interop-pydantic-ai")
 class TestPydanticAIInteroperabilityWithotContext:
     @pytest.fixture(autouse=True)
     def setup(self) -> None:
@@ -46,13 +46,8 @@ class TestPydanticAIInteroperabilityWithotContext:
         assert self.tool.description == "Roll a six-sided dice and return the result."
         assert self.tool.func() in ["1", "2", "3", "4", "5", "6"]
 
-    @pytest.mark.openai
-    def test_with_llm(self, credentials_gpt_4o: Credentials) -> None:
-        user_proxy = UserProxyAgent(
-            name="User",
-            human_input_mode="NEVER",
-        )
-
+    @run_for_optional_imports("openai", "openai")
+    def test_with_llm(self, credentials_gpt_4o: Credentials, user_proxy: UserProxyAgent) -> None:
         chatbot = AssistantAgent(name="chatbot", llm_config=credentials_gpt_4o.llm_config)
 
         self.tool.register_for_execution(user_proxy)
@@ -69,10 +64,10 @@ class TestPydanticAIInteroperabilityWithotContext:
 
 
 @pytest.mark.interop
-@skip_on_missing_imports("pydantic_ai", "interop-pydantic-ai")
+@run_for_optional_imports("pydantic_ai", "interop-pydantic-ai")
 class TestPydanticAIInteroperabilityDependencyInjection:
     def test_dependency_injection(self) -> None:
-        def f(
+        def f(  # type: ignore[no-any-unimported]
             ctx: RunContext[int],  # type: ignore[valid-type]
             city: str,
             date: str,
@@ -99,7 +94,7 @@ class TestPydanticAIInteroperabilityDependencyInjection:
         assert g(**kwargs) == "Zagreb 2021-01-01 123"
 
     def test_dependency_injection_with_retry(self) -> None:
-        def f(
+        def f(  # type: ignore[no-any-unimported]
             ctx: RunContext[int],  # type: ignore[valid-type]
             city: str,
             date: str,
@@ -135,7 +130,7 @@ class TestPydanticAIInteroperabilityDependencyInjection:
 
 
 @pytest.mark.interop
-@skip_on_missing_imports("pydantic_ai", "interop-pydantic-ai")
+@run_for_optional_imports("pydantic_ai", "interop-pydantic-ai")
 class TestPydanticAIInteroperabilityWithContext:
     @pytest.fixture(autouse=True)
     def setup(self) -> None:
@@ -143,10 +138,11 @@ class TestPydanticAIInteroperabilityWithContext:
             name: str
             age: int
 
-        def get_player(ctx: RunContext[Player], additional_info: Optional[str] = None) -> str:  # type: ignore[valid-type]
+        def get_player(ctx: RunContext[Player], additional_info: Optional[str] = None) -> str:  # type: ignore[valid-type,no-any-unimported]
             """Get the player's name.
 
             Args:
+                ctx: The context object.
                 additional_info: Additional information which can be used.
             """
             return f"Name: {ctx.deps.name}, Age: {ctx.deps.age}, Additional info: {additional_info}"  # type: ignore[attr-defined]
@@ -160,7 +156,7 @@ class TestPydanticAIInteroperabilityWithContext:
             PydanticAIInteroperability.convert_tool(tool=self.pydantic_ai_tool, deps=None)
 
     def test_expected_tools(self) -> None:
-        config_list = [{"model": "gpt-4o", "api_key": "abc"}]
+        config_list = [{"api_type": "openai", "model": "gpt-4o", "api_key": "abc"}]
         chatbot = AssistantAgent(
             name="chatbot",
             llm_config={"config_list": config_list},
@@ -190,13 +186,8 @@ class TestPydanticAIInteroperabilityWithContext:
 
         assert chatbot.llm_config["tools"] == expected_tools  # type: ignore[index]
 
-    @pytest.mark.openai
-    def test_with_llm(self, credentials_gpt_4o: Credentials) -> None:
-        user_proxy = UserProxyAgent(
-            name="User",
-            human_input_mode="NEVER",
-        )
-
+    @run_for_optional_imports("openai", "openai")
+    def test_with_llm(self, credentials_gpt_4o: Credentials, user_proxy: UserProxyAgent) -> None:
         chatbot = AssistantAgent(
             name="chatbot",
             llm_config=credentials_gpt_4o.llm_config,

@@ -7,11 +7,6 @@
 from .agent import Agent, LLMAgent
 from .assistant_agent import AssistantAgent
 from .chat import ChatResult, a_initiate_chats, initiate_chats
-from .contrib.reasoning_agent import (
-    ReasoningAgent,
-    ThinkNode,
-    visualize_tree,
-)
 
 # Imported last to avoid circular imports
 from .contrib.swarm_agent import (
@@ -21,6 +16,7 @@ from .contrib.swarm_agent import (
     AfterWorkOption,
     ContextStr,
     OnCondition,
+    OnContextCondition,
     SwarmAgent,
     SwarmResult,
     a_initiate_swarm_chat,
@@ -30,7 +26,7 @@ from .contrib.swarm_agent import (
 from .conversable_agent import UPDATE_SYSTEM_MESSAGE, ConversableAgent, UpdateSystemMessage, register_function
 from .groupchat import GroupChat, GroupChatManager
 from .user_proxy_agent import UserProxyAgent
-from .utils import gather_usage_summary
+from .utils import ContextExpression, gather_usage_summary
 
 __all__ = [
     "AFTER_WORK",
@@ -41,16 +37,16 @@ __all__ = [
     "Agent",
     "AssistantAgent",
     "ChatResult",
+    "ContextExpression",
     "ContextStr",
     "ConversableAgent",
     "GroupChat",
     "GroupChatManager",
     "LLMAgent",
     "OnCondition",
-    "ReasoningAgent",
+    "OnContextCondition",
     "SwarmAgent",
     "SwarmResult",
-    "ThinkNode",
     "UpdateSystemMessage",
     "UserProxyAgent",
     "a_initiate_chats",
@@ -60,5 +56,4 @@ __all__ = [
     "initiate_swarm_chat",
     "register_function",
     "register_hand_off",
-    "visualize_tree",
 ]

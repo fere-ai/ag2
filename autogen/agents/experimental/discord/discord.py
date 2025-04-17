@@ -2,11 +2,10 @@
 #
 # SPDX-License-Identifier: Apache-2.0
 
-from typing import Optional, Union
+from typing import Any, Optional
 
 from .... import ConversableAgent
 from ....doc_utils import export_module
-from ....tools import Tool
 from ....tools.experimental import DiscordRetrieveTool, DiscordSendTool
 
 __all__ = ["DiscordAgent"]
@@ -16,37 +15,42 @@ __all__ = ["DiscordAgent"]
 class DiscordAgent(ConversableAgent):
     """An agent that can send messages and retrieve messages on Discord."""
 
+    DEFAULT_SYSTEM_MESSAGE = (
+        "You are a helpful AI assistant that communicates through Discord. "
+        "Remember that Discord uses Markdown for formatting and has a character limit. "
+        "Keep messages clear and concise, and consider using appropriate formatting when helpful."
+    )
+
     def __init__(
         self,
-        system_message: Optional[Union[str, list]] = None,
-        *args,
+        name: str,
+        system_message: Optional[str] = None,
+        *,
         bot_token: str,
         channel_name: str,
         guild_name: str,
         has_writing_instructions: bool = True,
-        **kwargs,
+        **kwargs: Any,
     ) -> None:
         """Initialize the DiscordAgent.
 
         Args:
-            llm_config (dict[str, Any]): The LLM configuration.
-            bot_token (str): Discord bot token
-            channel_name (str): Channel name where messages will be sent / retrieved
-            guild_name (str): Guild (server) name where the channel is located
-            has_writing_instructions (bool): Whether to add writing instructions to the system message. Defaults to True.
+            name: name of the agent.
+            system_message: system message for the ChatCompletion inference.
+            bot_token: Discord bot token
+            channel_name: Channel name where messages will be sent / retrieved
+            guild_name: Guild (server) name where the channel is located
+            has_writing_instructions: Whether to add writing instructions to the system message. Defaults to True.
+            **kwargs: Additional keyword arguments passed to the parent ConversableAgent class.
         """
-        system_message = system_message or (
-            "You are a helpful AI assistant that communicates through Discord. "
-            "Remember that Discord uses Markdown for formatting and has a character limit. "
-            "Keep messages clear and concise, and consider using appropriate formatting when helpful."
-        )
+        discord_system_message = system_message or self.DEFAULT_SYSTEM_MESSAGE
 
         self._send_tool = DiscordSendTool(bot_token=bot_token, channel_name=channel_name, guild_name=guild_name)
         self._retrieve_tool = DiscordRetrieveTool(bot_token=bot_token, channel_name=channel_name, guild_name=guild_name)
 
         # Add formatting instructions
         if has_writing_instructions:
-            system_message = system_message + (
+            formatting_instructions = (
                 "\nFormat guidelines for Discord:\n"
                 "1. Max message length: 2000 characters\n"
                 "2. Supports Markdown formatting\n"
@@ -54,11 +58,9 @@ class DiscordAgent(ConversableAgent):
                 "4. Consider using appropriate emojis when suitable\n"
             )
 
-        super().__init__(*args, system_message=system_message, **kwargs)
+            discord_system_message = discord_system_message + formatting_instructions
+
+        super().__init__(name=name, system_message=discord_system_message, **kwargs)
 
         self.register_for_llm()(self._send_tool)
         self.register_for_llm()(self._retrieve_tool)
-
-    @property
-    def tools(self) -> list[Tool]:
-        return [self._send_tool, self._retrieve_tool]

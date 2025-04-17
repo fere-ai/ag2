@@ -10,13 +10,20 @@ import json
 from logging import getLogger
 from typing import Annotated, Any, Callable, ForwardRef, Optional, TypeVar, Union
 
+from packaging.version import parse
 from pydantic import BaseModel, Field, TypeAdapter
-from pydantic._internal._typing_extra import try_eval_type
+from pydantic import __version__ as pydantic_version
 from pydantic.json_schema import JsonSchemaValue
 from typing_extensions import Literal, get_args, get_origin
 
 from ..doc_utils import export_module
 from .dependency_injection import Field as AG2Field
+
+if parse(pydantic_version) < parse("2.10.2"):
+    from pydantic._internal._typing_extra import eval_type_lenient as try_eval_type
+else:
+    from pydantic._internal._typing_extra import try_eval_type
+
 
 __all__ = ["get_function_schema", "load_basemodels_if_needed", "serialize_to_str"]
 
@@ -160,7 +167,7 @@ def get_required_params(typed_signature: inspect.Signature) -> list[str]:
     """Get the required parameters of a function
 
     Args:
-        signature: The signature of the function as returned by inspect.signature
+        typed_signature: The signature of the function as returned by inspect.signature
 
     Returns:
         A list of the required parameters of the function
@@ -172,7 +179,7 @@ def get_default_values(typed_signature: inspect.Signature) -> dict[str, Any]:
     """Get default values of parameters of a function
 
     Args:
-        signature: The signature of the function as returned by inspect.signature
+        typed_signature: The signature of the function as returned by inspect.signature
 
     Returns:
         A dictionary of the default values of the parameters of the function
@@ -189,7 +196,8 @@ def get_parameters(
 
     Args:
         required: The required parameters of the function
-        hints: The type hints of the function as returned by typing.get_type_hints
+        param_annotations: The type annotations of the parameters of the function
+        default_values: The default values of the parameters of the function
 
     Returns:
         A Pydantic model for the parameters of the function

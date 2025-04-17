@@ -12,7 +12,7 @@ import inspect
 import os
 import time
 import unittest
-from typing import Annotated, Any, Callable, Literal, Optional
+from typing import Annotated, Any, Callable, List, Literal, Optional, Union
 from unittest.mock import MagicMock
 
 import pytest
@@ -22,6 +22,10 @@ import autogen
 from autogen.agentchat import ConversableAgent, UpdateSystemMessage, UserProxyAgent
 from autogen.agentchat.conversable_agent import register_function
 from autogen.exception_utils import InvalidCarryOverTypeError, SenderRequiredError
+from autogen.import_utils import run_for_optional_imports, skip_on_missing_imports
+from autogen.llm_config import LLMConfig
+from autogen.oai.client import OpenAILLMConfigEntry
+from autogen.tools.tool import Tool
 
 from ..conftest import (
     Credentials,
@@ -59,7 +63,9 @@ def test_conversable_agent_name_with_white_space(
     ):
         ConversableAgent(name=name, llm_config=llm_config)
 
-    llm_config["config_list"][0]["api_type"] = "something-else"
+    llm_config["config_list"][0]["api_type"] = "azure"
+    llm_config["config_list"][0]["api_version"] = "2023-01-01"
+    llm_config["config_list"][0]["base_url"] = "https://api.azure.com/v1"
     agent = ConversableAgent(name=name, llm_config=llm_config)
     assert agent.name == name
 
@@ -387,6 +393,31 @@ def test_max_consecutive_auto_reply():
     assert agent1.reply_at_receive[agent] is False and agent.reply_at_receive[agent1] is True
 
 
+def test_max_consecutive_auto_reply_with_max_turns(capsys: pytest.CaptureFixture[str]):
+    agent1 = ConversableAgent("agent1", max_consecutive_auto_reply=1, llm_config=False, human_input_mode="NEVER")
+    agent2 = ConversableAgent("agent2", max_consecutive_auto_reply=100, llm_config=False, human_input_mode="NEVER")
+
+    # max_consecutive_auto_reply parameter on the agent that initiates chat
+    agent1.initiate_chat(agent2, message="hello", max_turns=50)
+    assert len(agent2.chat_messages[agent1]) == 4
+    assert len(agent1.chat_messages[agent2]) == 4
+    # checking captured output
+    captured = capsys.readouterr()
+    assert "TERMINATING RUN" in captured.out
+    assert "Maximum number of consecutive auto-replies reached" in captured.out
+
+    _ = capsys.readouterr()  # Explicitly clear buffer
+
+    # max_consecutive_auto_reply parameter on the recipient agent
+    agent2.initiate_chat(agent1, message="hello", max_turns=50)
+    assert len(agent1.chat_messages[agent2]) == 3
+    assert len(agent2.chat_messages[agent1]) == 3
+    # checking captured output
+    captured = capsys.readouterr()
+    assert "TERMINATING RUN" in captured.out
+    assert "Maximum number of consecutive auto-replies reached" in captured.out
+
+
 def test_conversable_agent():
     dummy_agent_1 = ConversableAgent(name="dummy_agent_1", llm_config=False, human_input_mode="ALWAYS")
     dummy_agent_2 = ConversableAgent(name="dummy_agent_2", llm_config=False, human_input_mode="TERMINATE")
@@ -595,79 +626,95 @@ def test_update_function_signature_and_register_functions(mock_credentials: Cred
     assert agent.function_map["sh"] == exec_sh
 
 
-def test__wrap_function_sync():
-    CurrencySymbol = Literal["USD", "EUR"]  # noqa: N806
+class TestWrapFunction:
+    def test__wrap_function_sync(self):
+        CurrencySymbol = Literal["USD", "EUR"]  # noqa: N806
 
-    class Currency(BaseModel):
-        currency: CurrencySymbol = Field(description="Currency code")
-        amount: float = Field(default=100.0, description="Amount of money in the currency")
+        class Currency(BaseModel):
+            currency: CurrencySymbol = Field(description="Currency code")
+            amount: float = Field(default=100.0, description="Amount of money in the currency")
 
-    Currency(currency="USD", amount=100.0)
+        Currency(currency="USD", amount=100.0)
 
-    def exchange_rate(base_currency: CurrencySymbol, quote_currency: CurrencySymbol) -> float:
-        if base_currency == quote_currency:
-            return 1.0
-        elif base_currency == "USD" and quote_currency == "EUR":
-            return 1 / 1.1
-        elif base_currency == "EUR" and quote_currency == "USD":
-            return 1.1
-        else:
-            raise ValueError(f"Unknown currencies {base_currency}, {quote_currency}")
+        def exchange_rate(base_currency: CurrencySymbol, quote_currency: CurrencySymbol) -> float:
+            if base_currency == quote_currency:
+                return 1.0
+            elif base_currency == "USD" and quote_currency == "EUR":
+                return 1 / 1.1
+            elif base_currency == "EUR" and quote_currency == "USD":
+                return 1.1
+            else:
+                raise ValueError(f"Unknown currencies {base_currency}, {quote_currency}")
 
-    agent = ConversableAgent(name="agent", llm_config=False)
+        agent = ConversableAgent(name="agent", llm_config=False)
 
-    @agent._wrap_function
-    def currency_calculator(
-        base: Annotated[Currency, "Base currency"],
-        quote_currency: Annotated[CurrencySymbol, "Quote currency"] = "EUR",
-    ) -> Currency:
-        quote_amount = exchange_rate(base.currency, quote_currency) * base.amount
-        return Currency(amount=quote_amount, currency=quote_currency)
+        @agent._wrap_function
+        def currency_calculator(
+            base: Annotated[Currency, "Base currency"],
+            quote_currency: Annotated[CurrencySymbol, "Quote currency"] = "EUR",
+        ) -> Currency:
+            quote_amount = exchange_rate(base.currency, quote_currency) * base.amount
+            return Currency(amount=quote_amount, currency=quote_currency)
 
-    assert (
-        currency_calculator(base={"currency": "USD", "amount": 110.11}, quote_currency="EUR")
-        == '{"currency":"EUR","amount":100.1}'
-    )
+        assert (
+            currency_calculator(base={"currency": "USD", "amount": 110.11}, quote_currency="EUR")
+            == '{"currency":"EUR","amount":100.1}'
+        )
 
-    assert not inspect.iscoroutinefunction(currency_calculator)
+        assert not inspect.iscoroutinefunction(currency_calculator)
 
+    @pytest.mark.skip(reason="Not implemented yet")
+    def test__wrap_function_list(self) -> None:
+        class Point(BaseModel):
+            x: float
+            y: float
 
-@pytest.mark.asyncio
-async def test__wrap_function_async():
-    CurrencySymbol = Literal["USD", "EUR"]  # noqa: N806
+        agent = ConversableAgent(name="agent", llm_config=False)
 
-    class Currency(BaseModel):
-        currency: CurrencySymbol = Field(description="Currency code")
-        amount: float = Field(default=100.0, description="Amount of money in the currency")
+        @agent._wrap_function
+        def f(xs: list[tuple[float, float]], ys: List[Point]) -> List[Point]:
+            return [Point(x=x, y=y) for (x, y) in xs] + ys
 
-    Currency(currency="USD", amount=100.0)
+        assert f([(1.0, 2.0), (3.0, 4.0)], [Point(x=5.0, y=6.0)]) == [
+            Point(x=x, y=y) for (x, y) in [(1.0, 2.0), (3.0, 4.0), (5.0, 6.0)]
+        ]
 
-    def exchange_rate(base_currency: CurrencySymbol, quote_currency: CurrencySymbol) -> float:
-        if base_currency == quote_currency:
-            return 1.0
-        elif base_currency == "USD" and quote_currency == "EUR":
-            return 1 / 1.1
-        elif base_currency == "EUR" and quote_currency == "USD":
-            return 1.1
-        else:
-            raise ValueError(f"Unknown currencies {base_currency}, {quote_currency}")
+    @pytest.mark.asyncio
+    async def test__wrap_function_async(self):
+        CurrencySymbol = Literal["USD", "EUR"]  # noqa: N806
 
-    agent = ConversableAgent(name="agent", llm_config=False)
+        class Currency(BaseModel):
+            currency: CurrencySymbol = Field(description="Currency code")
+            amount: float = Field(default=100.0, description="Amount of money in the currency")
 
-    @agent._wrap_function
-    async def currency_calculator(
-        base: Annotated[Currency, "Base currency"],
-        quote_currency: Annotated[CurrencySymbol, "Quote currency"] = "EUR",
-    ) -> Currency:
-        quote_amount = exchange_rate(base.currency, quote_currency) * base.amount
-        return Currency(amount=quote_amount, currency=quote_currency)
+        Currency(currency="USD", amount=100.0)
 
-    assert (
-        await currency_calculator(base={"currency": "USD", "amount": 110.11}, quote_currency="EUR")
-        == '{"currency":"EUR","amount":100.1}'
-    )
+        def exchange_rate(base_currency: CurrencySymbol, quote_currency: CurrencySymbol) -> float:
+            if base_currency == quote_currency:
+                return 1.0
+            elif base_currency == "USD" and quote_currency == "EUR":
+                return 1 / 1.1
+            elif base_currency == "EUR" and quote_currency == "USD":
+                return 1.1
+            else:
+                raise ValueError(f"Unknown currencies {base_currency}, {quote_currency}")
 
-    assert inspect.iscoroutinefunction(currency_calculator)
+        agent = ConversableAgent(name="agent", llm_config=False)
+
+        @agent._wrap_function
+        async def currency_calculator(
+            base: Annotated[Currency, "Base currency"],
+            quote_currency: Annotated[CurrencySymbol, "Quote currency"] = "EUR",
+        ) -> Currency:
+            quote_amount = exchange_rate(base.currency, quote_currency) * base.amount
+            return Currency(amount=quote_amount, currency=quote_currency)
+
+        assert (
+            await currency_calculator(base={"currency": "USD", "amount": 110.11}, quote_currency="EUR")
+            == '{"currency":"EUR","amount":100.1}'
+        )
+
+        assert inspect.iscoroutinefunction(currency_calculator)
 
 
 def get_origin(d: dict[str, Callable[..., Any]]) -> dict[str, Callable[..., Any]]:
@@ -848,7 +895,7 @@ def test_register_for_llm_without_LLM():  # noqa: N802
 def test_register_for_llm_without_configuration():
     with pytest.raises(
         ValueError,
-        match="When using OpenAI or Azure OpenAI endpoints, specify a non-empty 'model' either in 'llm_config' or in each config of 'config_list'.",
+        match="List should have at least 1 item after validation, not 0",
     ):
         ConversableAgent(name="agent", llm_config={"config_list": []})
 
@@ -856,7 +903,7 @@ def test_register_for_llm_without_configuration():
 def test_register_for_llm_without_model_name():
     with pytest.raises(
         ValueError,
-        match="When using OpenAI or Azure OpenAI endpoints, specify a non-empty 'model' either in 'llm_config' or in each config of 'config_list'.",
+        match="String should have at least 1 character",
     ):
         ConversableAgent(name="agent", llm_config={"config_list": [{"model": ""}]})
 
@@ -933,23 +980,26 @@ def test_register_functions(mock_credentials: Credentials):
     assert agent.llm_config["tools"] == expected
 
 
-@pytest.mark.openai
+@run_for_optional_imports("openai", "openai")
 def test_function_registration_e2e_sync(credentials_gpt_4o_mini: Credentials) -> None:
-    coder = autogen.AssistantAgent(
-        name="chatbot",
-        system_message="For coding tasks, only use the functions you have been provided with. Reply TERMINATE when the task is done.",
-        llm_config=credentials_gpt_4o_mini.llm_config,
-    )
+    llm_config = LLMConfig(**credentials_gpt_4o_mini.llm_config)
 
-    # create a UserProxyAgent instance named "user_proxy"
-    user_proxy = autogen.UserProxyAgent(
-        name="user_proxy",
-        system_message="A proxy for the user for executing code.",
-        is_termination_msg=lambda x: x.get("content", "") and x.get("content", "").rstrip().endswith("TERMINATE"),
-        human_input_mode="NEVER",
-        max_consecutive_auto_reply=10,
-        code_execution_config={"work_dir": "coding"},
-    )
+    with llm_config:
+        coder = autogen.AssistantAgent(
+            name="chatbot",
+            system_message="For coding tasks, only use the functions you have been provided with. Reply TERMINATE when the task is done.",
+            # llm_config=credentials_gpt_4o_mini.llm_config,
+        )
+
+        # create a UserProxyAgent instance named "user_proxy"
+        user_proxy = autogen.UserProxyAgent(
+            name="user_proxy",
+            system_message="A proxy for the user for executing code.",
+            is_termination_msg=lambda x: x.get("content", "") and x.get("content", "").rstrip().endswith("TERMINATE"),
+            human_input_mode="NEVER",
+            max_consecutive_auto_reply=10,
+            code_execution_config={"work_dir": "coding"},
+        )
 
     # define functions according to the function description
     timer_mock = unittest.mock.MagicMock()
@@ -1067,7 +1117,7 @@ async def test_function_registration_e2e_async(
     await _test_function_registration_e2e_async(credentials_from_test_param)
 
 
-@pytest.mark.openai
+@run_for_optional_imports("openai", "openai")
 def test_max_turn(credentials_gpt_4o_mini: Credentials) -> None:
     # create an AssistantAgent instance named "assistant"
     assistant = autogen.AssistantAgent(
@@ -1087,7 +1137,7 @@ def test_max_turn(credentials_gpt_4o_mini: Credentials) -> None:
     assert len(res.chat_history) <= 6
 
 
-@pytest.mark.openai
+@run_for_optional_imports("openai", "openai")
 def test_message_func(credentials_gpt_4o_mini: Credentials):
     import random
 
@@ -1138,7 +1188,7 @@ def test_message_func(credentials_gpt_4o_mini: Credentials):
     print(chat_res_play.summary)
 
 
-@pytest.mark.openai
+@run_for_optional_imports("openai", "openai")
 def test_summary(credentials_gpt_4o_mini: Credentials):
     import random
 
@@ -1389,7 +1439,7 @@ def test_http_client():
 
 
 def test_adding_duplicate_function_warning():
-    config_base = [{"base_url": "http://0.0.0.0:8000", "api_key": "NULL"}]
+    config_base = [{"base_url": "http://0.0.0.0:8000", "api_key": "NULL", "model": "gpt-4"}]
 
     agent = autogen.ConversableAgent(
         "jtoy",
@@ -1526,7 +1576,7 @@ def test_conversable_agent_with_whitespaces_in_name_end2end(
         user_proxy.initiate_chat(agent, message="Hello, how are you?", max_turns=2)
 
 
-@pytest.mark.openai
+@run_for_optional_imports("openai", "openai")
 def test_context_variables():
     # Test initialization with context_variables
     initial_context = {"test_key": "test_value", "number": 42, "nested": {"inner": "value"}}
@@ -1617,6 +1667,7 @@ def test_gemini_with_tools_parameters_set_to_is_annotated_with_none_as_default_v
 
 @pytest.mark.deepseek
 @suppress_json_decoder_error
+@skip_on_missing_imports(["openai"], "openai")
 def test_conversable_agent_with_deepseek_reasoner(
     credentials_deepseek_reasoner: Credentials,
 ) -> None:
@@ -1666,6 +1717,217 @@ def test_update_system_message():
         ConversableAgent("agent5", update_agent_state_before_reply=UpdateSystemMessage(invalid_return_function))
 
 
+def test_tools_property(conversable_agent):
+    """Test the tools property returns a copy of the tools list."""
+    # Initial tools list should be empty
+    assert len(conversable_agent.tools) == 0
+
+    # Create a mock tool
+    mock_tool = Tool(name="test_tool", description="A test tool", func_or_tool=lambda x: x)
+
+    # Add tool directly to internal list
+    conversable_agent._tools.append(mock_tool)
+
+    # Get tools list
+    tools = conversable_agent.tools
+    assert len(tools) == 1
+    assert tools[0] == mock_tool
+
+    # Verify we got a copy by modifying the returned list
+    tools.clear()
+    assert len(conversable_agent._tools) == 1  # Original list should be unchanged
+
+
+def test_add_tool_for_llm(mock_credentials: Credentials):
+    """Test adding a tool for LLM use."""
+
+    agent = ConversableAgent(name="agent", llm_config=mock_credentials.llm_config)
+
+    def sample_tool_func(my_prop: str) -> str:
+        return my_prop * 2
+
+    mock_tool = Tool(name="test_tool", description="A test tool", func_or_tool=sample_tool_func)
+
+    # Add the tool
+    agent.register_for_llm()(mock_tool)
+
+    # Verify tool was added to internal list
+    assert len(agent._tools) == 1
+    assert agent._tools[0] == mock_tool
+
+    # Verify tool was registered with LLM
+    tool_schemas = [tool["function"]["name"] for tool in agent.llm_config.get("tools", [])]
+    assert mock_tool.name in tool_schemas
+
+
+def test_add_tool_for_llm_invalid_type(conversable_agent):
+    """Test adding an invalid tool type raises TypeError."""
+    with pytest.raises(
+        TypeError, match="'func_or_tool' must be a function or a Tool object, got '<class 'str'>' instead."
+    ):
+        conversable_agent.register_for_llm()("not a tool")
+
+
+def test_remove_tool_for_llm(mock_credentials: Credentials):
+    """Test removing a tool."""
+    agent = ConversableAgent(name="agent", llm_config=mock_credentials.llm_config)
+
+    def sample_tool_func(my_prop: str) -> str:
+        return my_prop * 2
+
+    mock_tool = Tool(name="test_tool", description="A test tool", func_or_tool=sample_tool_func)
+
+    agent.register_for_llm()(mock_tool)
+
+    # Remove the tool
+    agent.remove_tool_for_llm(mock_tool)
+
+    # Verify tool was removed from internal list
+    assert len(agent._tools) == 0
+
+    # Verify tool was unregistered from LLM
+    tool_schemas = [tool["function"]["name"] for tool in agent.llm_config.get("tools", [])]
+    print(mock_tool.name)
+    print(tool_schemas)
+    assert mock_tool.name not in tool_schemas
+
+
+def test_remove_tool_by_name_for_llm(mock_credentials: Credentials):
+    """Test removing a tool."""
+    agent = ConversableAgent(name="agent", llm_config=mock_credentials.llm_config)
+
+    def sample_tool_func(my_prop: str) -> str:
+        return my_prop * 2
+
+    mock_tool = Tool(name="test_tool", description="A test tool", func_or_tool=sample_tool_func)
+
+    agent.register_for_llm()(mock_tool)
+
+    # Remove the tool by name
+    agent.update_tool_signature(tool_sig="test_tool", is_remove=True)
+
+    # Verify tool was removed from internal list
+    assert "tools" not in mock_credentials.llm_config
+
+    # Verify tool was unregistered from LLM
+    tool_schemas = [tool["function"]["name"] for tool in agent.llm_config.get("tools", [])]
+    print(mock_tool.name)
+    print(tool_schemas)
+    assert mock_tool.name not in tool_schemas
+
+
+def test_remove_tool_for_llm_not_found(mock_credentials: Credentials):
+    """Test removing a non-existent tool raises ValueError."""
+    agent = ConversableAgent(name="agent", llm_config=mock_credentials.llm_config)
+
+    def sample_tool_func(my_prop: str) -> str:
+        return my_prop * 2
+
+    mock_tool = Tool(name="test_tool", description="A test tool", func_or_tool=sample_tool_func)
+
+    with pytest.raises(AssertionError, match="The agent config doesn't have tool"):
+        agent.remove_tool_for_llm(mock_tool)
+
+
+def test_tool_integration(mock_credentials: Credentials):
+    """Test full tool integration workflow."""
+    agent = ConversableAgent(name="agent", llm_config=mock_credentials.llm_config)
+
+    def sample_tool_func(my_prop: str) -> str:
+        return my_prop * 2
+
+    tool1 = Tool(name="tool1", description="A test tool", func_or_tool=sample_tool_func)
+
+    tool2 = Tool(name="tool2", description="A test tool", func_or_tool=sample_tool_func)
+
+    # Add tools
+    agent.register_for_llm()(tool1)
+    agent.register_for_llm()(tool2)
+
+    # Verify both tools are in the list
+    assert len(agent.tools) == 2
+    tool_names = {t.name for t in agent.tools}
+    assert tool_names == {"tool1", "tool2"}
+
+    # Remove one tool
+    agent.remove_tool_for_llm(tool1)
+
+    # Verify only one tool remains
+    assert len(agent.tools) == 1
+    assert agent.tools[0].name == "tool2"
+
+    # Verify LLM config was updated
+    tool_schemas = [tool["function"]["name"] for tool in agent.llm_config.get("tools", [])]
+    assert "tool1" not in tool_schemas
+    assert "tool2" in tool_schemas
+
+
+def test_create_or_get_executor(mock_credentials: Credentials):
+    agent = ConversableAgent(name="agent", llm_config=mock_credentials.llm_config)
+    executor_agent = None
+
+    def log_result(result: str):
+        return "I have logged the result."
+
+    tool = Tool(
+        name="log_result",
+        description="Logs the result of the task.",
+        func_or_tool=log_result,
+    )
+
+    expected_tools = [
+        {
+            "type": "function",
+            "function": {
+                "description": "Logs the result of the task.",
+                "name": "log_result",
+                "parameters": {
+                    "type": "object",
+                    "properties": {"result": {"type": "string", "description": "result"}},
+                    "required": ["result"],
+                },
+            },
+        }
+    ]
+    executor_agent = None
+    for _ in range(2):
+        with agent._create_or_get_executor(
+            tools=[tool],
+        ) as executor:
+            if not executor_agent:
+                executor_agent = executor
+            else:
+                assert executor_agent == executor
+            assert isinstance(executor_agent, ConversableAgent)
+            assert agent.llm_config["tools"] == expected_tools
+            assert len(executor_agent.function_map.keys()) == 1
+
+
+@pytest.mark.parametrize(
+    "llm_config, expected",
+    [
+        (None, False),
+        (False, False),
+        pytest.param(
+            {"config_list": [{"model": "gpt-3", "api_key": "whatever"}]},
+            LLMConfig(config_list=[OpenAILLMConfigEntry(model="gpt-3", api_key="whatever")]),
+            marks=pytest.mark.xfail(
+                reason="This doesn't fails when executed with filename but fails when running using scripts"
+            ),
+        ),
+        (
+            LLMConfig(config_list=[OpenAILLMConfigEntry(model="gpt-3")]),
+            LLMConfig(config_list=[OpenAILLMConfigEntry(model="gpt-3")]),
+        ),
+    ],
+)
+def test_validate_llm_config(
+    llm_config: Optional[Union[LLMConfig, dict[str, Any], Literal[False]]], expected: Union[LLMConfig, Literal[False]]
+):
+    actual = ConversableAgent._validate_llm_config(llm_config)
+    assert actual == expected, f"{actual} != {expected}"
+
+
 if __name__ == "__main__":
     # test_trigger()
     # test_context()
@@ -1679,4 +1941,5 @@ if __name__ == "__main__":
     # test_process_gemini_carryover()
     # test_process_carryover()
     # test_context_variables()
+    # test_max_consecutive_auto_reply_with_max_turns()
     test_invalid_functions_parameter()

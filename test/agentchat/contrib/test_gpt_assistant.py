@@ -10,18 +10,22 @@ import os
 import uuid
 from unittest.mock import MagicMock
 
-import openai
 import pytest
 
 from autogen import OpenAIWrapper, UserProxyAgent
 from autogen.agentchat.contrib.gpt_assistant_agent import GPTAssistantAgent
+from autogen.import_utils import optional_import_block, run_for_optional_imports
 from autogen.oai.openai_utils import detect_gpt_assistant_api_version, retrieve_assistants_by_name
 
 from ...conftest import Credentials
 
+with optional_import_block() as result:
+    import openai  # noqa: F401
 
-@pytest.mark.openai
+
+@run_for_optional_imports("openai", "openai")
 @pytest.mark.parametrize("provider", ["openai", "azure"])
+@run_for_optional_imports(["openai"], "openai")
 def test_gpt_assistant_chat_openai(
     provider: str, credentials_gpt_4o_mini: Credentials, credentials_azure: Credentials
 ) -> None:
@@ -54,7 +58,7 @@ def _test_gpt_assistant_chat(credentials: Credentials) -> None:
         ask_ossinsight_mock(question)
         return "The repository microsoft/autogen has 123,456 stars on GitHub."
 
-    name = f"For test_gpt_assistant_chat {uuid.uuid4()}"
+    name = f"For_test_gpt_assistant_chat_{uuid.uuid4()}"
     analyst = GPTAssistantAgent(
         name=name,
         llm_config=credentials.llm_config,
@@ -97,8 +101,9 @@ def _test_gpt_assistant_chat(credentials: Credentials) -> None:
     assert threads_count == 0
 
 
-@pytest.mark.openai
+@run_for_optional_imports("openai", "openai")
 @pytest.mark.parametrize("provider", ["openai", "azure"])
+@run_for_optional_imports(["openai"], "openai")
 def test_get_assistant_instructions(
     provider: str, credentials_gpt_4o_mini: Credentials, credentials_azure: Credentials
 ) -> None:
@@ -114,7 +119,7 @@ def _test_get_assistant_instructions(credentials: Credentials) -> None:
     """Test function to create a new GPTAssistantAgent, set its instructions, retrieve the instructions,
     and assert that the retrieved instructions match the set instructions.
     """
-    name = f"For test_get_assistant_instructions {uuid.uuid4()}"
+    name = f"For_test_get_assistant_instructions_{uuid.uuid4()}"
     assistant = GPTAssistantAgent(
         name,
         instructions="This is a test",
@@ -129,8 +134,9 @@ def _test_get_assistant_instructions(credentials: Credentials) -> None:
     assert instruction_match is True
 
 
-@pytest.mark.openai
+@run_for_optional_imports("openai", "openai")
 @pytest.mark.parametrize("provider", ["openai", "azure"])
+@run_for_optional_imports(["openai"], "openai")
 def test_gpt_assistant_instructions_overwrite(
     provider: str, credentials_gpt_4o_mini: Credentials, credentials_azure: Credentials
 ) -> None:
@@ -152,7 +158,7 @@ def _test_gpt_assistant_instructions_overwrite(credentials: Credentials) -> None
     3. Create a new GPTAssistantAgent with the same ID but different instructions and `overwrite_instructions=True`.
     4. Check that the instructions of the assistant have been overwritten with the new ones.
     """
-    name = f"For test_gpt_assistant_instructions_overwrite {uuid.uuid4()}"
+    name = f"For_test_gpt_assistant_instructions_overwrite_{uuid.uuid4()}"
     instructions1 = "This is a test #1"
     instructions2 = "This is a test #2"
 
@@ -185,12 +191,13 @@ def _test_gpt_assistant_instructions_overwrite(credentials: Credentials) -> None
     assert instruction_match is True
 
 
-@pytest.mark.openai
+@run_for_optional_imports("openai", "openai")
+@run_for_optional_imports(["openai"], "openai")
 def test_gpt_assistant_existing_no_instructions(credentials_gpt_4o_mini: Credentials) -> None:
     """Test function to check if the GPTAssistantAgent can retrieve instructions for an existing assistant
     even if the assistant was created with no instructions initially.
     """
-    name = f"For test_gpt_assistant_existing_no_instructions {uuid.uuid4()}"
+    name = f"For_test_gpt_assistant_existing_no_instructions_{uuid.uuid4()}"
     instructions = "This is a test #1"
 
     assistant = GPTAssistantAgent(
@@ -221,7 +228,8 @@ def test_gpt_assistant_existing_no_instructions(credentials_gpt_4o_mini: Credent
     assert instruction_match is True
 
 
-@pytest.mark.openai
+@run_for_optional_imports("openai", "openai")
+@run_for_optional_imports(["openai"], "openai")
 def test_get_assistant_files(credentials_gpt_4o_mini: Credentials) -> None:
     """Test function to create a new GPTAssistantAgent, set its instructions, retrieve the instructions,
     and assert that the retrieved instructions match the set instructions.
@@ -229,7 +237,7 @@ def test_get_assistant_files(credentials_gpt_4o_mini: Credentials) -> None:
     current_file_path = os.path.abspath(__file__)
     openai_client = OpenAIWrapper(config_list=credentials_gpt_4o_mini.config_list)._clients[0]._oai_client
     file = openai_client.files.create(file=open(current_file_path, "rb"), purpose="assistants")  # noqa: SIM115
-    name = f"For test_get_assistant_files {uuid.uuid4()}"
+    name = f"For_test_get_assistant_files_{uuid.uuid4()}"
     gpt_assistant_api_version = detect_gpt_assistant_api_version()
 
     # keep it to test older version of assistant config
@@ -252,7 +260,7 @@ def test_get_assistant_files(credentials_gpt_4o_mini: Credentials) -> None:
             vectorstore_ids = oas_assistant.tool_resources.file_search.vector_store_ids
             retrieved_file_ids = []
             for vectorstore_id in vectorstore_ids:
-                files = assistant.openai_client.beta.vector_stores.files.list(vector_store_id=vectorstore_id)
+                files = assistant.openai_client.vector_stores.files.list(vector_store_id=vectorstore_id)
                 retrieved_file_ids.extend([fild.id for fild in files])
         expected_file_id = file.id
     finally:
@@ -262,10 +270,11 @@ def test_get_assistant_files(credentials_gpt_4o_mini: Credentials) -> None:
     assert expected_file_id in retrieved_file_ids
 
 
-@pytest.mark.openai
+@run_for_optional_imports("openai", "openai")
+@run_for_optional_imports(["openai"], "openai")
 def test_assistant_retrieval(credentials_gpt_4o_mini: Credentials) -> None:
     """Test function to check if the GPTAssistantAgent can retrieve the same assistant"""
-    name = f"For test_assistant_retrieval {uuid.uuid4()}"
+    name = f"For_test_assistant_retrieval_{uuid.uuid4()}"
 
     function_1_schema = {
         "name": "call_function_1",
@@ -298,7 +307,7 @@ def test_assistant_retrieval(credentials_gpt_4o_mini: Credentials) -> None:
             "file_ids": [file_1.id, file_2.id],
         }
 
-        name = f"For test_assistant_retrieval {uuid.uuid4()}"
+        name = f"For_test_assistant_retrieval_{uuid.uuid4()}"
 
         assistant_first = GPTAssistantAgent(
             name,
@@ -333,10 +342,11 @@ def test_assistant_retrieval(credentials_gpt_4o_mini: Credentials) -> None:
     assert len(candidates) == 0
 
 
-@pytest.mark.openai
+@run_for_optional_imports("openai", "openai")
+@run_for_optional_imports(["openai"], "openai")
 def test_assistant_mismatch_retrieval(credentials_gpt_4o_mini: Credentials) -> None:
     """Test function to check if the GPTAssistantAgent can filter out the mismatch assistant"""
-    name = f"For test_assistant_retrieval {uuid.uuid4()}"
+    name = f"For_test_assistant_retrieval_{uuid.uuid4()}"
 
     function_1_schema = {
         "name": "call_function_1",
@@ -372,7 +382,7 @@ def test_assistant_mismatch_retrieval(credentials_gpt_4o_mini: Credentials) -> N
             "config_list": credentials_gpt_4o_mini.config_list,
         }
 
-        name = f"For test_assistant_retrieval {uuid.uuid4()}"
+        name = f"For_test_assistant_retrieval_{uuid.uuid4()}"
 
         assistant_first, assistant_instructions_mistaching = None, None
         try:
@@ -429,7 +439,8 @@ def test_assistant_mismatch_retrieval(credentials_gpt_4o_mini: Credentials) -> N
     assert len(candidates) == 0
 
 
-@pytest.mark.openai
+@run_for_optional_imports("openai", "openai")
+@run_for_optional_imports(["openai"], "openai")
 def test_gpt_assistant_tools_overwrite(credentials_gpt_4o_mini: Credentials) -> None:
     """Test that the tools of a GPTAssistantAgent can be overwritten or not depending on the value of the
     `overwrite_tools` parameter when creating a new assistant with the same ID.
@@ -508,7 +519,7 @@ def test_gpt_assistant_tools_overwrite(credentials_gpt_4o_mini: Credentials) -> 
         },
     ]
 
-    name = f"For test_gpt_assistant_tools_overwrite {uuid.uuid4()}"
+    name = f"For_test_gpt_assistant_tools_overwrite_{uuid.uuid4()}"
 
     # Create an assistant with original tools
     assistant_org = GPTAssistantAgent(
@@ -546,7 +557,8 @@ def test_gpt_assistant_tools_overwrite(credentials_gpt_4o_mini: Credentials) -> 
     assert retrieved_tools_name == [tool["function"]["name"] for tool in new_tools]
 
 
-@pytest.mark.openai
+@run_for_optional_imports("openai", "openai")
+@run_for_optional_imports(["openai"], "openai")
 def test_gpt_reflection_with_llm(credentials_gpt_4o_mini: Credentials) -> None:
     gpt_assistant = GPTAssistantAgent(
         name="assistant", llm_config={"config_list": credentials_gpt_4o_mini.config_list, "assistant_id": None}
@@ -574,7 +586,8 @@ def test_gpt_reflection_with_llm(credentials_gpt_4o_mini: Credentials) -> None:
     assert result is not None
 
 
-@pytest.mark.openai
+@run_for_optional_imports("openai", "openai")
+@run_for_optional_imports(["openai"], "openai")
 def test_assistant_tool_and_function_role_messages(credentials_gpt_4o_mini: Credentials) -> None:
     """Tests that internally generated roles ('tool', 'function') are correctly mapped to
     OpenAI Assistant API-compatible role ('assistant') before sending to the OpenAI API
@@ -582,7 +595,7 @@ def test_assistant_tool_and_function_role_messages(credentials_gpt_4o_mini: Cred
 
     See PR: Fix role mapping in GPTAssistantAgent for OpenAI API compatibility #46
     """
-    name = f"For test_gpt_assistant_special_roles {uuid.uuid4()}"
+    name = f"For_test_gpt_assistant_special_roles_{uuid.uuid4()}"
     assistant = GPTAssistantAgent(
         name,
         llm_config={

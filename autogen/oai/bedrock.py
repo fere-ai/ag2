@@ -36,19 +36,48 @@ import os
 import re
 import time
 import warnings
-from typing import Any, Literal
+from typing import Any, Literal, Optional
 
 import requests
-from openai.types.chat import ChatCompletion, ChatCompletionMessageToolCall
-from openai.types.chat.chat_completion import ChatCompletionMessage, Choice
-from openai.types.completion_usage import CompletionUsage
+from pydantic import Field, SecretStr, field_serializer
 
 from ..import_utils import optional_import_block, require_optional_import
+from ..llm_config import LLMConfigEntry, register_llm_config
 from .client_utils import validate_parameter
+from .oai_models import ChatCompletion, ChatCompletionMessage, ChatCompletionMessageToolCall, Choice, CompletionUsage
 
 with optional_import_block():
     import boto3
     from botocore.config import Config
+
+
+@register_llm_config
+class BedrockLLMConfigEntry(LLMConfigEntry):
+    api_type: Literal["bedrock"] = "bedrock"
+    aws_region: str
+    aws_access_key: Optional[SecretStr] = None
+    aws_secret_key: Optional[SecretStr] = None
+    aws_session_token: Optional[SecretStr] = None
+    aws_profile_name: Optional[str] = None
+    temperature: Optional[float] = None
+    topP: Optional[float] = None  # noqa: N815
+    maxTokens: Optional[int] = None  # noqa: N815
+    top_p: Optional[float] = None
+    top_k: Optional[int] = None
+    k: Optional[int] = None
+    seed: Optional[int] = None
+    cache_seed: Optional[int] = None
+    supports_system_prompts: bool = True
+    stream: bool = False
+    price: Optional[list[float]] = Field(default=None, min_length=2, max_length=2)
+    timeout: Optional[int] = None
+
+    @field_serializer("aws_access_key", "aws_secret_key", "aws_session_token", when_used="unless-none")
+    def serialize_aws_secrets(self, v: SecretStr) -> str:
+        return v.get_secret_value()
+
+    def create_client(self):
+        raise NotImplementedError("BedrockLLMConfigEntry.create_client must be implemented.")
 
 
 @require_optional_import("boto3", "bedrock")
@@ -64,6 +93,7 @@ class BedrockClient:
         self._aws_session_token = kwargs.get("aws_session_token")
         self._aws_region = kwargs.get("aws_region")
         self._aws_profile_name = kwargs.get("aws_profile_name")
+        self._timeout = kwargs.get("timeout")
 
         if not self._aws_access_key:
             self._aws_access_key = os.getenv("AWS_ACCESS_KEY")
@@ -80,11 +110,15 @@ class BedrockClient:
         if self._aws_region is None:
             raise ValueError("Region is required to use the Amazon Bedrock API.")
 
+        if self._timeout is None:
+            self._timeout = 60
+
         # Initialize Bedrock client, session, and runtime
         bedrock_config = Config(
             region_name=self._aws_region,
             signature_version="v4",
             retries={"max_attempts": self._retries, "mode": "standard"},
+            read_timeout=self._timeout,
         )
 
         session = boto3.Session(
@@ -192,7 +226,7 @@ class BedrockClient:
         return base_params, additional_params
 
     def create(self, params) -> ChatCompletion:
-        """Run Amazon Bedrock inference and return AutoGen response"""
+        """Run Amazon Bedrock inference and return AG2 response"""
         # Set custom client class settings
         self.parse_custom_params(params)
 
@@ -271,11 +305,11 @@ class BedrockClient:
         }
 
 
-def extract_system_messages(messages: list[dict]) -> list:
+def extract_system_messages(messages: list[dict[str, Any]]) -> list:
     """Extract the system messages from the list of messages.
 
     Args:
-        messages (list[dict]): List of messages.
+        messages (list[dict[str, Any]]): List of messages.
 
     Returns:
         List[SystemMessage]: List of System messages.
@@ -296,7 +330,7 @@ def extract_system_messages(messages: list[dict]) -> list:
 
 def oai_messages_to_bedrock_messages(
     messages: list[dict[str, Any]], has_tools: bool, supports_system_prompts: bool
-) -> list[dict]:
+) -> list[dict[str, Any]]:
     """Convert messages from OAI format to Bedrock format.
     We correct for any specific role orders and types, etc.
     AWS Bedrock requires messages to alternate between user and assistant roles. This function ensures that the messages
@@ -428,7 +462,7 @@ def oai_messages_to_bedrock_messages(
 
 def parse_content_parts(
     message: dict[str, Any],
-) -> list[dict]:
+) -> list[dict[str, Any]]:
     content: str | list[dict[str, Any]] = message.get("content")
     if isinstance(content, str):
         return [
@@ -522,7 +556,7 @@ def format_tools(tools: list[dict[str, Any]]) -> dict[Literal["tools"], list[dic
 
 
 def format_tool_calls(content):
-    """Converts Converse API response tool calls to AutoGen format"""
+    """Converts Converse API response tool calls to AG2 format"""
     tool_calls = []
     for tool_request in content:
         if "toolUse" in tool_request:

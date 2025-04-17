@@ -12,6 +12,7 @@ from collections import defaultdict
 from typing import Any, Optional, Union
 
 from ... import OpenAIWrapper
+from ...llm_config import LLMConfig
 from ...oai.openai_utils import create_gpt_assistant, retrieve_assistants_by_name, update_gpt_assistant
 from ...runtime_logging import log_new_agent, logging_enabled
 from ..agent import Agent
@@ -21,7 +22,7 @@ logger = logging.getLogger(__name__)
 
 
 class GPTAssistantAgent(ConversableAgent):
-    """An experimental AutoGen agent class that leverages the OpenAI Assistant API for conversational capabilities.
+    """An experimental AG2 agent class that leverages the OpenAI Assistant API for conversational capabilities.
     This agent is unique in its reliance on the OpenAI Assistant for state management, differing from other agents like ConversableAgent.
     """
 
@@ -31,11 +32,11 @@ class GPTAssistantAgent(ConversableAgent):
         self,
         name="GPT Assistant",
         instructions: Optional[str] = None,
-        llm_config: Optional[Union[dict, bool]] = None,
-        assistant_config: Optional[dict] = None,
+        llm_config: Optional[Union[LLMConfig, dict[str, Any], bool]] = None,
+        assistant_config: Optional[dict[str, Any]] = None,
         overwrite_instructions: bool = False,
         overwrite_tools: bool = False,
-        **kwargs,
+        **kwargs: Any,
     ):
         """Args:
         name (str): name of the agent. It will be used to find the existing assistant by name. Please remember to delete an old assistant with the same name if you intend to create a new assistant with the same name.
@@ -46,7 +47,7 @@ class GPTAssistantAgent(ConversableAgent):
         and the assistant does not exist, the system message will be set to
         AssistantAgent.DEFAULT_SYSTEM_MESSAGE. If the assistant exists, the
         system message will be set to the existing assistant instructions.
-        llm_config (dict or False): llm inference configuration.
+        llm_config (LLMConfig or dict or False): llm inference configuration.
             - model: Model to use for the assistant (gpt-4-1106-preview, gpt-3.5-turbo-1106).
         assistant_config
             - assistant_id: ID of the assistant to use. If None, a new assistant will be created.
@@ -181,10 +182,10 @@ class GPTAssistantAgent(ConversableAgent):
 
     def _invoke_assistant(
         self,
-        messages: Optional[list[dict]] = None,
+        messages: Optional[list[dict[str, Any]]] = None,
         sender: Optional[Agent] = None,
         config: Optional[Any] = None,
-    ) -> tuple[bool, Union[str, dict, None]]:
+    ) -> tuple[bool, Optional[Union[str, dict[str, Any]]]]:
         """Invokes the OpenAI assistant to generate a reply based on the given messages.
 
         Args:
@@ -268,6 +269,7 @@ class GPTAssistantAgent(ConversableAgent):
         """Waits for and processes the response of a run from the OpenAI assistant.
 
         Args:
+            thread: The thread object initiated with the OpenAI assistant.
             run: The run object initiated with the OpenAI assistant.
 
         Returns:

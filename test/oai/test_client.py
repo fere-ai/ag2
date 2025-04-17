@@ -7,6 +7,7 @@
 # !/usr/bin/env python3 -m pytest
 
 import copy
+import inspect
 import os
 import shutil
 import time
@@ -14,11 +15,23 @@ from collections.abc import Generator
 from unittest.mock import MagicMock
 
 import pytest
+from pydantic import ValidationError
 
 from autogen import OpenAIWrapper
 from autogen.cache.cache import Cache
-from autogen.import_utils import optional_import_block, skip_on_missing_imports
-from autogen.oai.client import LEGACY_CACHE_DIR, LEGACY_DEFAULT_CACHE_SEED, OpenAIClient
+from autogen.import_utils import optional_import_block, run_for_optional_imports
+from autogen.llm_config import LLMConfig
+from autogen.oai.client import (
+    AOPENAI_FALLBACK_KWARGS,
+    LEGACY_CACHE_DIR,
+    LEGACY_DEFAULT_CACHE_SEED,
+    OPENAI_FALLBACK_KWARGS,
+    AzureOpenAILLMConfigEntry,
+    DeepSeekLLMConfigEntry,
+    OpenAIClient,
+    OpenAILLMConfigEntry,
+)
+from autogen.oai.oai_models import ChatCompletion
 
 from ..conftest import Credentials
 
@@ -26,14 +39,14 @@ TOOL_ENABLED = False
 
 with optional_import_block() as result:
     import openai
-    from openai import OpenAI
+    from openai import AzureOpenAI, OpenAI
 
     if openai.__version__ >= "1.1.0":
         TOOL_ENABLED = True
 
 
-@pytest.mark.openai
-@skip_on_missing_imports(["openai"])
+@run_for_optional_imports("openai", "openai")
+@run_for_optional_imports(["openai"], "openai")
 def test_aoai_chat_completion(credentials_azure_gpt_35_turbo: Credentials):
     config_list = credentials_azure_gpt_35_turbo.config_list
     client = OpenAIWrapper(config_list=config_list)
@@ -51,9 +64,16 @@ def test_aoai_chat_completion(credentials_azure_gpt_35_turbo: Credentials):
     print(client.extract_text_or_completion_object(response))
 
 
-@pytest.mark.openai
+@run_for_optional_imports("openai", "openai")
+@run_for_optional_imports(["openai"], "openai")
+def test_fallback_kwargs():
+    assert set(inspect.getfullargspec(OpenAI.__init__).kwonlyargs) == OPENAI_FALLBACK_KWARGS
+    assert set(inspect.getfullargspec(AzureOpenAI.__init__).kwonlyargs) == AOPENAI_FALLBACK_KWARGS
+
+
+@run_for_optional_imports("openai", "openai")
 @pytest.mark.skipif(not TOOL_ENABLED, reason="openai>=1.1.0 not installed")
-@skip_on_missing_imports(["openai"])
+@run_for_optional_imports(["openai"], "openai")
 def test_oai_tool_calling_extraction(credentials_gpt_4o_mini: Credentials):
     client = OpenAIWrapper(config_list=credentials_gpt_4o_mini.config_list)
     response = client.create(
@@ -85,8 +105,8 @@ def test_oai_tool_calling_extraction(credentials_gpt_4o_mini: Credentials):
     print(client.extract_text_or_completion_object(response))
 
 
-@pytest.mark.openai
-@skip_on_missing_imports(["openai"])
+@run_for_optional_imports("openai", "openai")
+@run_for_optional_imports(["openai"], "openai")
 def test_chat_completion(credentials_gpt_4o_mini: Credentials):
     client = OpenAIWrapper(config_list=credentials_gpt_4o_mini.config_list)
     response = client.create(messages=[{"role": "user", "content": "1+1="}])
@@ -94,8 +114,8 @@ def test_chat_completion(credentials_gpt_4o_mini: Credentials):
     print(client.extract_text_or_completion_object(response))
 
 
-@pytest.mark.openai
-@skip_on_missing_imports(["openai"])
+@run_for_optional_imports("openai", "openai")
+@run_for_optional_imports(["openai"], "openai")
 def test_completion(credentials_azure_gpt_35_turbo_instruct: Credentials):
     client = OpenAIWrapper(config_list=credentials_azure_gpt_35_turbo_instruct.config_list)
     response = client.create(prompt="1+1=")
@@ -103,8 +123,8 @@ def test_completion(credentials_azure_gpt_35_turbo_instruct: Credentials):
     print(client.extract_text_or_completion_object(response))
 
 
-@pytest.mark.openai
-@skip_on_missing_imports(["openai"])
+@run_for_optional_imports("openai", "openai")
+@run_for_optional_imports(["openai"], "openai")
 @pytest.mark.parametrize(
     "cache_seed",
     [
@@ -118,8 +138,8 @@ def test_cost(credentials_azure_gpt_35_turbo_instruct: Credentials, cache_seed):
     print(response.cost)
 
 
-@pytest.mark.openai
-@skip_on_missing_imports(["openai"])
+@run_for_optional_imports("openai", "openai")
+@run_for_optional_imports(["openai"], "openai")
 def test_customized_cost(credentials_azure_gpt_35_turbo_instruct: Credentials):
     config_list = credentials_azure_gpt_35_turbo_instruct.config_list
     for config in config_list:
@@ -131,8 +151,8 @@ def test_customized_cost(credentials_azure_gpt_35_turbo_instruct: Credentials):
     )
 
 
-@pytest.mark.openai
-@skip_on_missing_imports(["openai"])
+@run_for_optional_imports("openai", "openai")
+@run_for_optional_imports(["openai"], "openai")
 def test_usage_summary(credentials_azure_gpt_35_turbo_instruct: Credentials):
     client = OpenAIWrapper(config_list=credentials_azure_gpt_35_turbo_instruct.config_list)
     response = client.create(prompt="1+3=", cache_seed=None)
@@ -163,8 +183,64 @@ def test_usage_summary(credentials_azure_gpt_35_turbo_instruct: Credentials):
     )
 
 
-@pytest.mark.openai
-@skip_on_missing_imports(["openai"])
+@run_for_optional_imports(["openai"], "openai")
+def test_log_cache_seed_value(mock_credentials: Credentials, monkeypatch: pytest.MonkeyPatch):
+    chat_completion = ChatCompletion(**{
+        "id": "chatcmpl-B2ZfaI387UgmnNXS69egxeKbDWc0u",
+        "choices": [
+            {
+                "finish_reason": "stop",
+                "index": 0,
+                "logprobs": None,
+                "message": {
+                    "content": "The history of human civilization spans thousands of years, beginning with the emergence of Homo sapiens in Africa around 200,000 years ago. Early humans formed hunter-gatherer societies before transitioning to agriculture during the Neolithic Revolution, around 10,000 BCE, leading to the establishment of permanent settlements. The rise of city-states and empires, such as Mesopotamia, Ancient Egypt, and the Indus Valley, marked significant advancements in governance, trade, and culture. The classical era saw the flourish of philosophies and science in Greece and Rome, while the Middle Ages brought feudalism and the spread of religions. The Renaissance sparked exploration and modernization, culminating in the contemporary globalized world.",
+                    "refusal": None,
+                    "role": "assistant",
+                    "audio": None,
+                    "function_call": None,
+                    "tool_calls": None,
+                },
+            }
+        ],
+        "created": 1739953470,
+        "model": "gpt-4o-mini-2024-07-18",
+        "object": "chat.completion",
+        "service_tier": "default",
+        "system_fingerprint": "fp_13eed4fce1",
+        "usage": {
+            "completion_tokens": 142,
+            "prompt_tokens": 23,
+            "total_tokens": 165,
+            "completion_tokens_details": {
+                "accepted_prediction_tokens": 0,
+                "audio_tokens": 0,
+                "reasoning_tokens": 0,
+                "rejected_prediction_tokens": 0,
+            },
+            "prompt_tokens_details": {"audio_tokens": 0, "cached_tokens": 0},
+        },
+        "cost": 8.864999999999999e-05,
+    })
+
+    mock_logger = MagicMock()
+    mock_cache_get = MagicMock(return_value=chat_completion)
+    monkeypatch.setattr("autogen.oai.client.logger", mock_logger)
+    monkeypatch.setattr("autogen.cache.disk_cache.DiskCache.get", mock_cache_get)
+
+    prompt = "Write a 100 word summary on the topic of the history of human civilization."
+
+    # Test single client
+    wrapper = OpenAIWrapper(config_list=mock_credentials.config_list)
+    _ = wrapper.create(messages=[{"role": "user", "content": prompt}], cache_seed=999)
+
+    mock_logger.debug.assert_called_once()
+    actual = mock_logger.debug.call_args[0][0]
+    expected = "Using cache with seed value 999 for client OpenAIClient"
+    assert actual == expected, f"Expected: {expected}, Actual: {actual}"
+
+
+@run_for_optional_imports("openai", "openai")
+@run_for_optional_imports(["openai"], "openai")
 def test_legacy_cache(credentials_gpt_4o_mini: Credentials):
     # Prompt to use for testing.
     prompt = "Write a 100 word summary on the topic of the history of human civilization."
@@ -227,8 +303,8 @@ def test_legacy_cache(credentials_gpt_4o_mini: Credentials):
     assert os.path.exists(os.path.join(LEGACY_CACHE_DIR, str(21)))
 
 
-@pytest.mark.openai
-@skip_on_missing_imports(["openai"])
+@run_for_optional_imports("openai", "openai")
+@run_for_optional_imports(["openai"], "openai")
 def test_cache(credentials_gpt_4o_mini: Credentials):
     # Prompt to use for testing.
     prompt = "Write a 100 word summary on the topic of the history of artificial intelligence."
@@ -289,6 +365,96 @@ def test_cache(credentials_gpt_4o_mini: Credentials):
         # Test legacy cache is not used.
         assert not os.path.exists(os.path.join(LEGACY_CACHE_DIR, str(123)))
         assert not os.path.exists(os.path.join(cache_dir, str(LEGACY_DEFAULT_CACHE_SEED)))
+
+
+@run_for_optional_imports(["openai"], "openai")
+def test_convert_system_role_to_user() -> None:
+    messages = [
+        {"content": "Your name is Jack and you are a comedian in a two-person comedy show.", "role": "system"},
+        {"content": "Jack, tell me a joke.", "role": "user", "name": "user"},
+    ]
+    OpenAIClient._convert_system_role_to_user(messages)
+    expected = [
+        {"content": "Your name is Jack and you are a comedian in a two-person comedy show.", "role": "user"},
+        {"content": "Jack, tell me a joke.", "role": "user", "name": "user"},
+    ]
+    assert messages == expected
+
+
+def test_openai_llm_config_entry():
+    openai_llm_config = OpenAILLMConfigEntry(
+        model="gpt-4o-mini", api_key="sk-mockopenaiAPIkeysinexpectedformatsfortestingonly"
+    )
+    assert openai_llm_config.api_type == "openai"
+    assert openai_llm_config.model == "gpt-4o-mini"
+    assert openai_llm_config.api_key.get_secret_value() == "sk-mockopenaiAPIkeysinexpectedformatsfortestingonly"
+    assert openai_llm_config.base_url is None
+    expected = {
+        "api_type": "openai",
+        "model": "gpt-4o-mini",
+        "api_key": "sk-mockopenaiAPIkeysinexpectedformatsfortestingonly",
+        "tags": [],
+    }
+    actual = openai_llm_config.model_dump()
+    assert actual == expected, f"Expected: {expected}, Actual: {actual}"
+
+
+def test_azure_llm_config_entry() -> None:
+    azure_llm_config = AzureOpenAILLMConfigEntry(
+        model="gpt-4o-mini",
+        api_key="sk-mockopenaiAPIkeysinexpectedformatsfortestingonly",
+        base_url="https://api.openai.com/v1",
+    )
+    expected = {
+        "api_type": "azure",
+        "model": "gpt-4o-mini",
+        "api_key": "sk-mockopenaiAPIkeysinexpectedformatsfortestingonly",
+        "base_url": "https://api.openai.com/v1",
+        "tags": [],
+    }
+    actual = azure_llm_config.model_dump()
+    assert actual == expected, f"Expected: {expected}, Actual: {actual}"
+
+    llm_config = LLMConfig(
+        config_list=[azure_llm_config],
+    )
+    assert llm_config.model_dump() == {
+        "config_list": [expected],
+    }
+
+
+def test_deepseek_llm_config_entry() -> None:
+    deepseek_llm_config = DeepSeekLLMConfigEntry(
+        api_key="fake_api_key",
+        model="deepseek-chat",
+    )
+
+    expected = {
+        "api_type": "deepseek",
+        "api_key": "fake_api_key",
+        "model": "deepseek-chat",
+        "base_url": "https://api.deepseek.com/v1",
+        "max_tokens": 8192,
+        "temperature": 0.5,
+        "tags": [],
+    }
+    actual = deepseek_llm_config.model_dump()
+    assert actual == expected, actual
+
+    llm_config = LLMConfig(
+        config_list=[deepseek_llm_config],
+    )
+    assert llm_config.model_dump() == {
+        "config_list": [expected],
+    }
+
+    with pytest.raises(ValidationError) as e:
+        deepseek_llm_config = DeepSeekLLMConfigEntry(
+            model="deepseek-chat",
+            temperature=1,
+            top_p=0.8,
+        )
+    assert "Value error, temperature and top_p cannot be set at the same time" in str(e.value)
 
 
 class TestOpenAIClientBadRequestsError:
@@ -488,7 +654,7 @@ class TestO1:
 
     def test_oai_reasoning_max_tokens_replacement(self, mock_oai_client: OpenAIClient) -> None:
         """Test that max_tokens is replaced with max_completion_tokens"""
-        test_params = {"model": "o1-mini", "max_tokens": 100}
+        test_params = {"api_type": "openai", "model": "o1-mini", "max_tokens": 100}
 
         mock_oai_client._process_reasoning_model_params(test_params)
 
@@ -550,7 +716,7 @@ class TestO1:
             [{"role": "user", "content": "2+2="}],
         ],
     )
-    @pytest.mark.openai
+    @run_for_optional_imports("openai", "openai")
     def test_completion_o1_mini(self, o1_mini_client: OpenAIWrapper, messages: list[dict[str, str]]) -> None:
         self._test_completion(o1_mini_client, messages)
 
@@ -561,7 +727,7 @@ class TestO1:
             [{"role": "user", "content": "2+2="}],
         ],
     )
-    @pytest.mark.openai
+    @run_for_optional_imports("openai", "openai")
     @pytest.mark.skip(reason="Wait for o1 to be available in CI")
     def test_completion_o1(self, o1_client: OpenAIWrapper, messages: list[dict[str, str]]) -> None:
         self._test_completion(o1_client, messages)

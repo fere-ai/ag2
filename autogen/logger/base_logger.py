@@ -11,10 +11,10 @@ import uuid
 from abc import ABC, abstractmethod
 from typing import TYPE_CHECKING, Any, Callable, TypeVar, Union
 
-from openai import AzureOpenAI, OpenAI
-from openai.types.chat import ChatCompletion
-
 if TYPE_CHECKING:
+    from openai import AzureOpenAI, OpenAI
+    from openai.types.chat import ChatCompletion
+
     from .. import Agent, ConversableAgent, OpenAIWrapper
 
 F = TypeVar("F", bound=Callable[..., Any])
@@ -47,7 +47,7 @@ class BaseLogger(ABC):
     ) -> None:
         """Log a chat completion to database.
 
-        In AutoGen, chat completions are somewhat complicated because they are handled by the `autogen.oai.OpenAIWrapper` class.
+        In AG2, chat completions are somewhat complicated because they are handled by the `autogen.oai.OpenAIWrapper` class.
         One invocation to `create` can lead to multiple underlying OpenAI calls, depending on the llm_config list used, and
         any errors or retries.
 
@@ -100,8 +100,9 @@ class BaseLogger(ABC):
         """Log the birth of a new OpenAIWrapper.
 
         Args:
-            wrapper (OpenAI):           The OpenAI client to log.
-            init_args (dict):           The arguments passed to the construct the client
+            client: The client to log.
+            wrapper: The wrapper that created the client.
+            init_args: The arguments passed to the construct the client.
         """
         ...
 

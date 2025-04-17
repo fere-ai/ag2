@@ -14,7 +14,7 @@ from hashlib import md5
 from pathlib import Path
 from time import sleep
 from types import TracebackType
-from typing import Any, ClassVar
+from typing import Any, ClassVar, Optional, Union
 
 import docker
 from docker.errors import ImageNotFound
@@ -64,13 +64,13 @@ class DockerCommandLineCodeExecutor(CodeExecutor):
     def __init__(
         self,
         image: str = "python:3-slim",
-        container_name: str | None = None,
+        container_name: Optional[str] = None,
         timeout: int = 60,
-        work_dir: Path | str = Path(),
-        bind_dir: Path | str | None = None,
+        work_dir: Optional[Union[Path, str]] = None,
+        bind_dir: Optional[Union[Path, str]] = None,
         auto_remove: bool = True,
         stop_container: bool = True,
-        execution_policies: dict[str, bool] | None = None,
+        execution_policies: Optional[dict[str, bool]] = None,
     ):
         """(Experimental) A code executor class that executes code through
         a command line environment in a Docker container.
@@ -84,25 +84,26 @@ class DockerCommandLineCodeExecutor(CodeExecutor):
         block.
 
         Args:
-            image (_type_, optional): Docker image to use for code execution.
-                Defaults to "python:3-slim".
-            container_name (Optional[str], optional): Name of the Docker container
-                which is created. If None, will autogenerate a name. Defaults to None.
-            timeout (int, optional): The timeout for code execution. Defaults to 60.
-            work_dir (Union[Path, str], optional): The working directory for the code
-                execution. Defaults to Path(".").
-            bind_dir (Union[Path, str], optional): The directory that will be bound
-            to the code executor container. Useful for cases where you want to spawn
-            the container from within a container. Defaults to work_dir.
-            auto_remove (bool, optional): If true, will automatically remove the Docker
-                container when it is stopped. Defaults to True.
-            stop_container (bool, optional): If true, will automatically stop the
+            image: Docker image to use for code execution. Defaults to "python:3-slim".
+            container_name: Name of the Docker container which is created. If None, will autogenerate a name. Defaults to None.
+            timeout: The timeout for code execution. Defaults to 60.
+            work_dir: The working directory for the code execution. Defaults to Path(".").
+            bind_dir: The directory that will be bound to the code executor container. Useful for cases where you want to spawn
+                the container from within a container. Defaults to work_dir.
+            auto_remove: If true, will automatically remove the Docker container when it is stopped. Defaults to True.
+            stop_container: If true, will automatically stop the
                 container when stop is called, when the context manager exits or when
                 the Python process exits with atext. Defaults to True.
+            execution_policies: A dictionary mapping language names to boolean values that determine
+                whether code in that language should be executed. True means code in that language
+                will be executed, False means it will only be saved to a file. This overrides the
+                default execution policies. Defaults to None.
 
         Raises:
             ValueError: On argument error, or if the container fails to start.
         """
+        work_dir = work_dir if work_dir is not None else Path()
+
         if timeout < 1:
             raise ValueError("Timeout must be greater than or equal to 1.")
 
@@ -259,6 +260,9 @@ class DockerCommandLineCodeExecutor(CodeExecutor):
         return self
 
     def __exit__(
-        self, exc_type: type[BaseException] | None, exc_val: BaseException | None, exc_tb: TracebackType | None
+        self,
+        exc_type: Optional[type[BaseException]],
+        exc_val: Optional[BaseException],
+        exc_tb: Optional[TracebackType],
     ) -> None:
         self.stop()

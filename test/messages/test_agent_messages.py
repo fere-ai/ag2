@@ -11,6 +11,7 @@ import termcolor.termcolor
 
 from autogen.agentchat.conversable_agent import ConversableAgent
 from autogen.coding.base import CodeBlock
+from autogen.import_utils import optional_import_block, run_for_optional_imports
 from autogen.messages.agent_messages import (
     ClearAgentsHistoryMessage,
     ClearConversableAgentHistoryMessage,
@@ -33,13 +34,17 @@ from autogen.messages.agent_messages import (
     SpeakerAttemptFailedMultipleAgentsMessage,
     SpeakerAttemptFailedNoAgentsMessage,
     SpeakerAttemptSuccessfulMessage,
-    TerminationAndHumanReplyMessage,
+    TerminationAndHumanReplyNoInputMessage,
+    TerminationMessage,
     TextMessage,
     ToolCallMessage,
     ToolResponseMessage,
     UsingAutoReplyMessage,
     create_received_message_model,
 )
+
+with optional_import_block():
+    import PIL
 
 
 @pytest.fixture(autouse=True)
@@ -414,6 +419,27 @@ class TestTextMessage:
 
         assert mock.call_args_list == expected_call_args_list
 
+    @run_for_optional_imports("PIL", "unknown")
+    def test_serialization(self) -> None:
+        image = PIL.Image.new(mode="RGB", size=(200, 200))
+        content = [
+            {"type": "text", "text": "What's the breed of this dog?\n"},
+            {"type": "image_url", "image_url": {"url": image}},
+            {"type": "text", "text": "."},
+        ]
+        uuid = UUID("f1b9b3b4-0b3b-4b3b-8b3b-0b3b3b3b3b3b")
+        text_message = TextMessage(content=content, sender_name="sender", recipient_name="recipient", uuid=uuid)
+
+        result = text_message.model_dump_json()
+
+        expected = (
+            '{"type":"text","content":{"uuid":"f1b9b3b4-0b3b-4b3b-8b3b-0b3b3b3b3b3b",'
+            '"content":[{"type":"text","text":"What\'s the breed of this dog?\\n"},'
+            '{"type":"image_url","image_url":{"url":"<image>"}},'
+            '{"type":"text","text":"."}],"sender_name":"sender","recipient_name":"recipient"}}'
+        )
+        assert str(result) == expected, result
+
 
 class TestPostCarryoverProcessingMessage:
     def test_print(self, uuid: UUID, sender: ConversableAgent, recipient: ConversableAgent) -> None:
@@ -776,16 +802,16 @@ class TestTerminationAndHumanReplyMessage:
     def test_print(self, uuid: UUID, sender: ConversableAgent, recipient: ConversableAgent) -> None:
         no_human_input_msg = "NO HUMAN INPUT RECEIVED."
 
-        actual = TerminationAndHumanReplyMessage(
+        actual = TerminationAndHumanReplyNoInputMessage(
             uuid=uuid,
             no_human_input_msg=no_human_input_msg,
             sender=sender,
             recipient=recipient,
         )
-        assert isinstance(actual, TerminationAndHumanReplyMessage)
+        assert isinstance(actual, TerminationAndHumanReplyNoInputMessage)
 
         expected_model_dump = {
-            "type": "termination_and_human_reply",
+            "type": "termination_and_human_reply_no_input",
             "content": {
                 "uuid": uuid,
                 "no_human_input_msg": no_human_input_msg,
@@ -799,6 +825,36 @@ class TestTerminationAndHumanReplyMessage:
         actual.print(f=mock)
         # print(mock.call_args_list)
         expected_call_args_list = [call("\x1b[31m\n>>>>>>>> NO HUMAN INPUT RECEIVED.\x1b[0m", flush=True)]
+        assert mock.call_args_list == expected_call_args_list
+
+
+class TestTerminationMessage:
+    def test_print(self, uuid: UUID) -> None:
+        termination_reason = "User requested to end the conversation."
+
+        actual = TerminationMessage(
+            uuid=uuid,
+            termination_reason=termination_reason,
+        )
+        assert isinstance(actual, TerminationMessage)
+
+        expected_model_dump = {
+            "type": "termination",
+            "content": {
+                "uuid": uuid,
+                "termination_reason": termination_reason,
+            },
+        }
+        assert actual.model_dump() == expected_model_dump
+
+        mock = MagicMock()
+        actual.print(f=mock)
+        # print(mock.call_args_list)
+        expected_call_args_list = [
+            call(
+                "\x1b[31m\n>>>>>>>> TERMINATING RUN (" + str(uuid) + "): " + termination_reason + "\x1b[0m", flush=True
+            )
+        ]
         assert mock.call_args_list == expected_call_args_list
 
 

@@ -21,6 +21,7 @@ from .realtime_test_utils import text_to_speech, trace
 logger = getLogger(__name__)
 
 
+# @run_for_optional_imports(["openai", "websockets"], "openai-realtime")
 class TestE2E:
     async def _test_e2e(self, credentials_llm: Credentials, credentials_openai: Credentials) -> None:
         """End-to-end test for the RealtimeAgent.
@@ -90,8 +91,8 @@ class TestE2E:
     @pytest.mark.parametrize(
         "credentials_llm_realtime",
         [
-            pytest.param("credentials_gpt_4o_realtime", marks=pytest.mark.openai),
-            pytest.param("credentials_gemini_realtime", marks=pytest.mark.gemini),
+            pytest.param("credentials_gpt_4o_realtime", marks=[pytest.mark.openai_realtime, pytest.mark.aux_neg_flag]),
+            pytest.param("credentials_gemini_realtime", marks=[pytest.mark.gemini_realtime, pytest.mark.aux_neg_flag]),
         ],
     )
     async def test_e2e(

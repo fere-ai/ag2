@@ -7,9 +7,11 @@
 from unittest.mock import MagicMock, patch
 
 import pytest
+from pydantic import ValidationError
 
-from autogen.import_utils import skip_on_missing_imports
-from autogen.oai.bedrock import BedrockClient, oai_messages_to_bedrock_messages
+from autogen.import_utils import run_for_optional_imports
+from autogen.llm_config import LLMConfig
+from autogen.oai.bedrock import BedrockClient, BedrockLLMConfigEntry, oai_messages_to_bedrock_messages
 
 
 # Fixtures for mock data
@@ -36,15 +38,88 @@ def bedrock_client():
     return client
 
 
+def test_bedrock_llm_config_entry():
+    bedrock_llm_config = BedrockLLMConfigEntry(
+        model="anthropic.claude-3-sonnet-20240229-v1:0",
+        aws_region="us-east-1",
+        aws_access_key="test_access_key_id",
+        aws_secret_key="test_secret_access_key",
+        aws_session_token="test_session_token",
+        temperature=0.8,
+        topP=0.6,
+        stream=False,
+    )
+    expected = {
+        "api_type": "bedrock",
+        "model": "anthropic.claude-3-sonnet-20240229-v1:0",
+        "aws_region": "us-east-1",
+        "aws_access_key": "test_access_key_id",
+        "aws_secret_key": "test_secret_access_key",
+        "aws_session_token": "test_session_token",
+        "temperature": 0.8,
+        "topP": 0.6,
+        "stream": False,
+        "tags": [],
+        "supports_system_prompts": True,
+    }
+    actual = bedrock_llm_config.model_dump()
+    assert actual == expected, actual
+
+    llm_config = LLMConfig(
+        config_list=[bedrock_llm_config],
+    )
+    assert llm_config.model_dump() == {
+        "config_list": [expected],
+    }
+
+    with pytest.raises(ValidationError) as e:
+        bedrock_llm_config = BedrockLLMConfigEntry(
+            model="anthropic.claude-3-sonnet-20240229-v1:0", aws_region="us-east-1", price=["0.1"]
+        )
+    assert " List should have at least 2 items after validation, not 1" in str(e.value)
+
+
+def test_bedrock_llm_config_entry_repr():
+    bedrock_llm_config = BedrockLLMConfigEntry(
+        model="anthropic.claude-3-sonnet-20240229-v1:0",
+        aws_region="us-east-1",
+        aws_access_key="test_access_key_id",
+        aws_secret_key="test_secret_access_key",
+        aws_session_token="test_session_token",
+        aws_profile_name="test_profile_name",
+    )
+
+    actual = repr(bedrock_llm_config)
+    expected = "BedrockLLMConfigEntry(api_type='bedrock', model='anthropic.claude-3-sonnet-20240229-v1:0', tags=[], aws_region='us-east-1', aws_access_key='**********', aws_secret_key='**********', aws_session_token='**********', aws_profile_name='test_profile_name', supports_system_prompts=True, stream=False)"
+
+    assert actual == expected, actual
+
+
+def test_bedrock_llm_config_entry_str():
+    bedrock_llm_config = BedrockLLMConfigEntry(
+        model="anthropic.claude-3-sonnet-20240229-v1:0",
+        aws_region="us-east-1",
+        aws_access_key="test_access_key_id",
+        aws_secret_key="test_secret_access_key",
+        aws_session_token="test_session_token",
+        aws_profile_name="test_profile_name",
+    )
+
+    actual = str(bedrock_llm_config)
+    expected = "BedrockLLMConfigEntry(api_type='bedrock', model='anthropic.claude-3-sonnet-20240229-v1:0', tags=[], aws_region='us-east-1', aws_access_key='**********', aws_secret_key='**********', aws_session_token='**********', aws_profile_name='test_profile_name', supports_system_prompts=True, stream=False)"
+
+    assert actual == expected, actual
+
+
 # Test initialization and configuration
-@skip_on_missing_imports(["boto3", "botocore"], "bedrock")
+@run_for_optional_imports(["boto3", "botocore"], "bedrock")
 def test_initialization():
     # Creation works without an api_key as it's handled in the parameter parsing
     BedrockClient(aws_region="us-east-1")
 
 
 # Test parameters
-@skip_on_missing_imports(["boto3", "botocore"], "bedrock")
+@run_for_optional_imports(["boto3", "botocore"], "bedrock")
 def test_parsing_params(bedrock_client):
     # All parameters (with default values)
     params = {
@@ -115,7 +190,7 @@ def test_parsing_params(bedrock_client):
 
 
 # Test text generation
-@skip_on_missing_imports(["boto3", "botocore"], "bedrock")
+@run_for_optional_imports(["boto3", "botocore"], "bedrock")
 @patch("autogen.oai.bedrock.BedrockClient.create")
 def test_create_response(mock_chat, bedrock_client):
     # Mock BedrockClient.chat response
@@ -151,7 +226,7 @@ def test_create_response(mock_chat, bedrock_client):
 
 
 # Test functions/tools
-@skip_on_missing_imports(["boto3", "botocore"], "bedrock")
+@run_for_optional_imports(["boto3", "botocore"], "bedrock")
 @patch("autogen.oai.bedrock.BedrockClient.create")
 def test_create_response_with_tool_call(mock_chat, bedrock_client):
     # Mock BedrockClient.chat response
@@ -217,7 +292,7 @@ def test_create_response_with_tool_call(mock_chat, bedrock_client):
 
 
 # Test message conversion from OpenAI to Bedrock format
-@skip_on_missing_imports(["boto3", "botocore"], "bedrock")
+@run_for_optional_imports(["boto3", "botocore"], "bedrock")
 def test_oai_messages_to_bedrock_messages(bedrock_client):
     # Test that the "name" key is removed and system messages converted to user message
     test_messages = [

@@ -33,17 +33,39 @@ import copy
 import os
 import time
 import warnings
-from typing import Any
+from typing import Any, Literal, Optional, Union
 
-from openai.types.chat import ChatCompletion, ChatCompletionMessageToolCall
-from openai.types.chat.chat_completion import ChatCompletionMessage, Choice
-from openai.types.completion_usage import CompletionUsage
+from pydantic import Field
 
 from ..import_utils import optional_import_block, require_optional_import
+from ..llm_config import LLMConfigEntry, register_llm_config
 from .client_utils import should_hide_tools, validate_parameter
+from .oai_models import ChatCompletion, ChatCompletionMessage, ChatCompletionMessageToolCall, Choice, CompletionUsage
 
 with optional_import_block():
     from together import Together
+
+
+@register_llm_config
+class TogetherLLMConfigEntry(LLMConfigEntry):
+    api_type: Literal["together"] = "together"
+    max_tokens: int = Field(default=512, ge=0)
+    stream: bool = False
+    temperature: Optional[float] = Field(default=None)
+    top_p: Optional[float] = Field(default=None)
+    top_k: Optional[int] = Field(default=None)
+    repetition_penalty: Optional[float] = Field(default=None)
+    presence_penalty: Optional[float] = Field(default=None, ge=-2, le=2)
+    frequency_penalty: Optional[float] = Field(default=None, ge=-2, le=2)
+    min_p: Optional[float] = Field(default=None, ge=0, le=1)
+    safety_model: Optional[str] = None
+    hide_tools: Literal["if_all_run", "if_any_run", "never"] = "never"
+    tool_choice: Optional[Union[str, dict[str, Union[str, dict[str, str]]]]] = (
+        None  # dict is the tool to call: {"type": "function", "function": {"name": "my_function"}}
+    )
+
+    def create_client(self):
+        raise NotImplementedError("TogetherLLMConfigEntry.create_client is not implemented.")
 
 
 class TogetherClient:
@@ -53,7 +75,7 @@ class TogetherClient:
         """Requires api_key or environment variable to be set
 
         Args:
-            api_key (str): The API key for using Together.AI (or environment variable TOGETHER_API_KEY needs to be set)
+            **kwargs: Additional keyword arguments to pass to the client.
         """
         # Ensure we have the api_key upon instantiation
         self.api_key = kwargs.get("api_key")
@@ -130,13 +152,16 @@ class TogetherClient:
 
             together_params["stream"] = False
 
+        if "tool_choice" in params:
+            together_params["tool_choice"] = params["tool_choice"]
+
         return together_params
 
     @require_optional_import("together", "together")
     def create(self, params: dict) -> ChatCompletion:
         messages = params.get("messages", [])
 
-        # Convert AutoGen messages to Together.AI messages
+        # Convert AG2 messages to Together.AI messages
         together_messages = oai_messages_to_together_messages(messages)
 
         # Parse parameters to Together.AI API's parameters

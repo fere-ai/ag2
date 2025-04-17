@@ -7,17 +7,17 @@ on:
   schedule:
     - cron: "0 0 * * *" # daily at midnight UTC
   workflow_dispatch: # allows manual triggering of the workflow
-  pull_request_target:
-    branches: ["main"]
-    paths:
-      - "autogen/agentchat/contrib/graph_rag/**"
-      - "test/agentchat/contrib/graph_rag/**"
-      - ".github/workflows/contrib-graph-rag-tests.yml"
-      - "pyproject.toml"
+  # pull_request_target:
+  #   branches: ["main"]
+  #   paths:
+  #     - "autogen/agentchat/contrib/graph_rag/**"
+  #     - "test/agentchat/contrib/graph_rag/**"
+  #     - ".github/workflows/contrib-graph-rag-tests.yml"
+  #     - "pyproject.toml"
 
 concurrency:
   group: ${{ github.workflow }}-${{ github.ref }}-${{ github.head_ref }}
-  cancel-in-progress: ${{ github.ref != 'refs/heads/main' }}
+  cancel-in-progress: true
 permissions:
   {}
   # actions: read
@@ -68,12 +68,12 @@ jobs:
           python-version: ${{ matrix.python-version }}
       - name: Install FalkorDB SDK when on linux
         run: |
-          uv pip install --system -e .[test,graph-rag-falkor-db]
+          uv pip install --system -e .[test,openai,graph-rag-falkor-db]
       - name: Set AUTOGEN_USE_DOCKER based on OS
         shell: bash
         run: |
           echo "AUTOGEN_USE_DOCKER=False" >> $GITHUB_ENV
-      - name: Coverage
+      - name: Run tests
         env:
           OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
           AZURE_OPENAI_API_KEY: ${{ secrets.AZURE_OPENAI_API_KEY }}
@@ -146,7 +146,7 @@ jobs:
         shell: bash
         run: |
           echo "AUTOGEN_USE_DOCKER=False" >> $GITHUB_ENV
-      - name: Coverage
+      - name: Run tests
         env:
           OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
           AZURE_OPENAI_API_KEY: ${{ secrets.AZURE_OPENAI_API_KEY }}
@@ -195,7 +195,7 @@ jobs:
   #       shell: bash
   #       run: |
   #         echo "AUTOGEN_USE_DOCKER=False" >> $GITHUB_ENV
-  #     - name: Coverage
+  #     - name: Run tests
   #       env:
   #         OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
   #         AZURE_OPENAI_API_KEY: ${{ secrets.AZURE_OPENAI_API_KEY }}

@@ -7,16 +7,20 @@ on:
   schedule:
     - cron: "0 0 * * *" # daily at midnight UTC
   workflow_dispatch: # allows manual triggering of the workflow
-  pull_request_target:
-    branches: ["main"]
-    paths:
-      - "autogen/**"
-      - "test/**"
-      - "notebook/agentchat_auto_feedback_from_code_execution.ipynb"
-      - "notebook/agentchat_function_call.ipynb"
-      - "notebook/agentchat_groupchat_finite_state_machine.ipynb"
-      - ".github/workflows/core-llm-test.yml"
-      - "pyproject.toml"
+  # pull_request_target:
+  #   branches: ["main"]
+  #   paths:
+  #     - "autogen/**"
+  #     - "test/**"
+  #     - "notebook/agentchat_auto_feedback_from_code_execution.ipynb"
+  #     - "notebook/agentchat_function_call.ipynb"
+  #     - "notebook/agentchat_groupchat_finite_state_machine.ipynb"
+  #     - ".github/workflows/core-llm-test.yml"
+  #     - "pyproject.toml"
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}-${{ github.head_ref }}
+  cancel-in-progress: true
 permissions:
   {}
 
@@ -24,7 +28,7 @@ jobs:
   test:
     strategy:
       matrix:
-        llm: ["openai", "gemini", "anthropic", "deepseek"]
+        llm: ["openai", "openai-realtime", "gemini", "gemini-realtime", "anthropic", "deepseek", "ollama", "bedrock", "cerebras"]
         python-version: ["3.9"]
         os: [ubuntu-latest]
       fail-fast: false
@@ -68,7 +72,10 @@ jobs:
         run: |
           docker --version
           uv pip install --system -e ".[test,redis,${{ matrix.llm }}]"
-          python -c "import autogen"
+      - name: Install openai if testing gemini-realtime
+        if: ${{ matrix.llm == 'gemini-realtime' }}
+        run: |
+          uv pip install --system -e ".[openai]"
       - name: LLM tests using ${{ matrix.llm }}
         env:
           OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
@@ -78,7 +85,10 @@ jobs:
           AZURE_OPENAI_API_KEY: ${{ secrets.AZURE_OPENAI_API_KEY }}
           AZURE_OPENAI_API_BASE: ${{ secrets.AZURE_OPENAI_API_BASE }}
           OAI_CONFIG_LIST: ${{ secrets.OAI_CONFIG_LIST }}
-        run: bash scripts/test-core-llm.sh -m "${{ matrix.llm }}"
+        run: |
+          llm_fixed="${{ matrix.llm }}" # Use the matrix variable
+          llm_fixed="${llm_fixed//-/_}" # Replace hyphen with underscore
+          bash scripts/test-core-llm.sh -m "$llm_fixed"
       - name: Show coverage report
         run: bash scripts/show-coverage-report.sh
       - name: Upload coverage to Codecov
@@ -86,6 +96,6 @@ jobs:
         uses: codecov/codecov-action@v5
         with:
           files: ./coverage.xml
-          flags: ${{ matrix.llm }}, ${{ matrix.os }}, ${{ matrix.python-version }}
+          flags: core-llm, ${{ matrix.llm }}, ${{ matrix.os }}, ${{ matrix.python-version }}
           fail_ci_if_error: true
           token: ${{ secrets.CODECOV_TOKEN }}

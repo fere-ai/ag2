@@ -6,29 +6,52 @@
 # SPDX-License-Identifier: MIT
 
 import os
-from typing import List
+from typing import Any
 from unittest.mock import MagicMock, patch
 
 import pytest
 from pydantic import BaseModel
 
-from autogen.import_utils import optional_import_block, skip_on_missing_imports
-from autogen.oai.gemini import GeminiClient
+from autogen.import_utils import optional_import_block, run_for_optional_imports
+from autogen.llm_config import LLMConfig
+from autogen.oai.gemini import GeminiClient, GeminiLLMConfigEntry
 
 with optional_import_block() as result:
     from google.api_core.exceptions import InternalServerError
     from google.auth.credentials import Credentials
     from google.cloud.aiplatform.initializer import global_config as vertexai_global_config
-    from google.genai.types import GenerateContentResponse
+    from google.genai.types import GenerateContentResponse, GoogleSearch, Tool
     from vertexai.generative_models import GenerationResponse as VertexAIGenerationResponse
     from vertexai.generative_models import HarmBlockThreshold as VertexAIHarmBlockThreshold
     from vertexai.generative_models import HarmCategory as VertexAIHarmCategory
     from vertexai.generative_models import SafetySetting as VertexAISafetySetting
 
 
-@skip_on_missing_imports(
-    ["vertexai", "PIL", "google.ai", "google.auth", "google.api", "google.cloud", "google.genai"], "gemini"
-)
+def test_gemini_llm_config_entry():
+    gemini_llm_config = GeminiLLMConfigEntry(
+        model="gemini-2.0-flash-lite", api_key="dummy_api_key", project_id="fake-project-id", location="us-west1"
+    )
+    expected = {
+        "api_type": "google",
+        "model": "gemini-2.0-flash-lite",
+        "api_key": "dummy_api_key",
+        "project_id": "fake-project-id",
+        "location": "us-west1",
+        "stream": False,
+        "tags": [],
+    }
+    actual = gemini_llm_config.model_dump()
+    assert actual == expected, actual
+
+    llm_config = LLMConfig(
+        config_list=[gemini_llm_config],
+    )
+    assert llm_config.model_dump() == {
+        "config_list": [expected],
+    }
+
+
+@run_for_optional_imports(["vertexai", "PIL", "google.auth", "google.api", "google.cloud", "google.genai"], "gemini")
 class TestGeminiClient:
     # Fixtures for mock data
     @pytest.fixture
@@ -91,6 +114,33 @@ class TestGeminiClient:
         assert vertexai_global_config.location == "us-west1", "Incorrect VertexAI location initialization"
         assert vertexai_global_config.project == "fake-project-id", "Incorrect VertexAI project initialization"
         assert vertexai_global_config.credentials == mock_credentials, "Incorrect VertexAI credentials initialization"
+
+    def test_extract_system_instruction(self, gemini_client):
+        # Test: valid system instruction
+        messages = [{"role": "system", "content": "You are my personal assistant."}]
+        assert gemini_client._extract_system_instruction(messages) == "You are my personal assistant."
+
+        # Test: empty system instruction
+        messages = [{"role": "system", "content": " "}]
+        assert gemini_client._extract_system_instruction(messages) is None
+
+        # Test: the first message is not a system instruction
+        messages = [
+            {"role": "user", "content": "Hello!"},
+            {"role": "system", "content": "You are my personal assistant."},
+        ]
+        assert gemini_client._extract_system_instruction(messages) is None
+
+        # Test: empty message list
+        assert gemini_client._extract_system_instruction([]) is None
+
+        # Test: None input
+        assert gemini_client._extract_system_instruction(None) is None
+
+        # Test: system message without "content" key
+        messages = [{"role": "system"}]
+        with pytest.raises(KeyError):
+            gemini_client._extract_system_instruction(messages)
 
     def test_gemini_message_handling(self, gemini_client):
         messages = [
@@ -250,39 +300,36 @@ class TestGeminiClient:
         )
         assert gemini_client.cost(response) > 0, "Cost should be correctly calculated as zero"
 
-    @patch("autogen.oai.gemini.genai.GenerativeModel")
+    @patch("autogen.oai.gemini.genai.Client")
     # @patch("autogen.oai.gemini.genai.configure")
     @patch("autogen.oai.gemini.calculate_gemini_cost")
-    def test_create_response_with_text(self, mock_calculate_cost, mock_generative_model, gemini_client):
-        # Mock the genai model configuration and creation process
-        mock_chat = MagicMock()
-        mock_model = MagicMock()
-        # mock_configure.return_value = None
-        mock_generative_model.return_value = mock_model
-        mock_model.start_chat.return_value = mock_chat
+    def test_create_response_with_text(self, mock_calculate_cost, mock_generative_client, gemini_client):
+        mock_calculate_cost.return_value = 0.002
 
-        # Set up mock token counts with real integers
-        mock_usage_metadata = MagicMock()
-        mock_usage_metadata.prompt_token_count = 100
-        mock_usage_metadata.candidates_token_count = 50
+        mock_chat = MagicMock()
+        mock_generative_client.return_value.chats.create.return_value = mock_chat
+        assert mock_generative_client().chats.create() == mock_chat
 
         mock_text_part = MagicMock()
         mock_text_part.text = "Example response"
         mock_text_part.function_call = None
 
+        mock_usage_metadata = MagicMock()
+        mock_usage_metadata.prompt_token_count = 100
+        mock_usage_metadata.candidates_token_count = 50
+
+        mock_candidate = MagicMock()
+        mock_candidate.content.parts = [mock_text_part]
+
         mock_response = MagicMock(spec=GenerateContentResponse)
-        mock_response._done = True
-        mock_response._iterator = None
-        mock_response._result = None
-        mock_response.parts = [mock_text_part]
-
         mock_response.usage_metadata = mock_usage_metadata
+        mock_response.candidates = [mock_candidate]
+
         mock_chat.send_message.return_value = mock_response
+        assert isinstance(mock_response, GenerateContentResponse)
 
-        # Mock the calculate_gemini_cost function
-        mock_calculate_cost.return_value = 0.002
+        assert isinstance(mock_chat.send_message("dkdk"), GenerateContentResponse)
 
-        # Call the create method
         response = gemini_client.create({
             "model": "gemini-pro",
             "messages": [{"content": "Hello", "role": "user"}],
@@ -290,7 +337,6 @@ class TestGeminiClient:
         })
 
         # Assertions to check if response is structured as expected
-        # assert isinstance(response, ChatCompletion), "Response should be an instance of ChatCompletion"
         assert response.choices[0].message.content == "Example response", (
             "Response content should match expected output"
         )
@@ -344,7 +390,6 @@ class TestGeminiClient:
         })
 
         # Assertions to check if response is structured as expected
-        # assert isinstance(response, ChatCompletion), "Response should be an instance of ChatCompletion"
         assert response.choices[0].message.content == "Example response", (
             "Response content should match expected output"
         )
@@ -364,7 +409,7 @@ class TestGeminiClient:
             output: str
 
         class MathReasoning(BaseModel):
-            steps: List[Step]
+            steps: list[Step]
             final_answer: str
 
         # Set up the response format
@@ -433,3 +478,172 @@ class TestGeminiClient:
         }
         converted_schema = GeminiClient._convert_type_null_to_nullable(initial_schema)
         assert converted_schema == expected_schema
+
+    @pytest.fixture
+    def nested_function_parameters(self) -> dict[str, Any]:
+        return {
+            "type": "object",
+            "properties": {
+                "task": {
+                    "$defs": {
+                        "Subquestion": {
+                            "properties": {
+                                "question": {
+                                    "description": "The original question.",
+                                    "title": "Question",
+                                    "type": "string",
+                                }
+                            },
+                            "required": ["question"],
+                            "title": "Subquestion",
+                            "type": "object",
+                        }
+                    },
+                    "properties": {
+                        "question": {
+                            "description": "The original question.",
+                            "title": "Question",
+                            "type": "string",
+                        },
+                        "subquestions": {
+                            "description": "The subquestions that need to be answered.",
+                            "items": {"$ref": "#/$defs/Subquestion"},
+                            "title": "Subquestions",
+                            "type": "array",
+                        },
+                    },
+                    "required": ["question", "subquestions"],
+                    "title": "Task",
+                    "type": "object",
+                    "description": "task",
+                }
+            },
+            "required": ["task"],
+        }
+
+    def test_unwrap_references(self, nested_function_parameters: dict[str, Any]) -> None:
+        result = GeminiClient._unwrap_references(nested_function_parameters)
+
+        expected_result = {
+            "type": "object",
+            "properties": {
+                "task": {
+                    "properties": {
+                        "question": {"description": "The original question.", "title": "Question", "type": "string"},
+                        "subquestions": {
+                            "description": "The subquestions that need to be answered.",
+                            "items": {
+                                "properties": {
+                                    "question": {
+                                        "description": "The original question.",
+                                        "title": "Question",
+                                        "type": "string",
+                                    }
+                                },
+                                "required": ["question"],
+                                "title": "Subquestion",
+                                "type": "object",
+                            },
+                            "title": "Subquestions",
+                            "type": "array",
+                        },
+                    },
+                    "required": ["question", "subquestions"],
+                    "title": "Task",
+                    "type": "object",
+                    "description": "task",
+                }
+            },
+            "required": ["task"],
+        }
+        assert result == expected_result, result
+
+    def test_create_gemini_function_parameters_with_nested_parameters(
+        self, nested_function_parameters: dict[str, Any]
+    ) -> None:
+        result = GeminiClient._create_gemini_function_parameters(nested_function_parameters)
+
+        expected_result = {
+            "type": "OBJECT",
+            "properties": {
+                "task": {
+                    "properties": {
+                        "question": {"description": "The original question.", "type": "STRING"},
+                        "subquestions": {
+                            "description": "The subquestions that need to be answered.",
+                            "items": {
+                                "properties": {"question": {"description": "The original question.", "type": "STRING"}},
+                                "required": ["question"],
+                                "type": "OBJECT",
+                            },
+                            "type": "ARRAY",
+                        },
+                    },
+                    "required": ["question", "subquestions"],
+                    "type": "OBJECT",
+                    "description": "task",
+                }
+            },
+            "required": ["task"],
+        }
+
+        assert result == expected_result, result
+
+    @pytest.mark.parametrize("name", ["prebuilt_google_search", "google_search"])
+    def test_check_if_prebuilt_google_search_tool_exists(self, name: str) -> None:
+        tools = [
+            {
+                "type": "function",
+                "function": {
+                    "description": "Google Search",
+                    "name": name,
+                    "parameters": {
+                        "type": "object",
+                        "properties": {
+                            "query": {"type": "string", "description": "The search query."},
+                            "num_results": {
+                                "type": "integer",
+                                "default": 10,
+                                "description": "The number of results to return.",
+                            },
+                        },
+                        "required": ["query"],
+                    },
+                },
+            }
+        ]
+        expected = name == "prebuilt_google_search"
+        assert GeminiClient._check_if_prebuilt_google_search_tool_exists(tools) == expected
+
+    @pytest.mark.parametrize("name", ["prebuilt_google_search", "google_search"])
+    def test_tools_to_gemini_tools(self, gemini_client: GeminiClient, name: str) -> None:
+        tools = [
+            {
+                "type": "function",
+                "function": {
+                    "description": "Google Search",
+                    "name": name,
+                    "parameters": {
+                        "type": "object",
+                        "properties": {
+                            "query": {"type": "string", "description": "The search query."},
+                            "num_results": {
+                                "type": "integer",
+                                "default": 10,
+                                "description": "The number of results to return.",
+                            },
+                        },
+                        "required": ["query"],
+                    },
+                },
+            }
+        ]
+        result = gemini_client._tools_to_gemini_tools(tools)
+        assert isinstance(result, list)
+        assert isinstance(result[0], Tool)
+
+        tools_list = [Tool(google_search=GoogleSearch())]
+        if name == "prebuilt_google_search":
+            assert result == tools_list
+        else:
+            assert result != tools_list

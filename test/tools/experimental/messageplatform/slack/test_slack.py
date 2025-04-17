@@ -7,14 +7,14 @@ from unittest.mock import MagicMock, Mock
 
 import pytest
 
-from autogen.import_utils import optional_import_block, skip_on_missing_imports
+from autogen.import_utils import optional_import_block, run_for_optional_imports
 from autogen.tools.experimental.messageplatform import SlackRetrieveTool, SlackSendTool
 
 with optional_import_block():
     from slack_sdk.errors import SlackApiError
 
 
-@skip_on_missing_imports("slack_sdk", "commsagent-slack")
+@run_for_optional_imports("slack_sdk", "commsagent-slack")
 class TestSlackSendTool:
     @pytest.fixture(autouse=True)
     def mock_webclient(self, monkeypatch: pytest.MonkeyPatch) -> MagicMock:
@@ -94,7 +94,7 @@ class TestSlackSendTool:
     async def test_slack_api_error(self, tool: SlackSendTool, mock_webclient: MagicMock) -> None:
         """Test handling of SlackApiError."""
         mock_instance = mock_webclient.return_value
-        mock_instance.chat_postMessage.side_effect = SlackApiError(
+        mock_instance.chat_postMessage.side_effect = SlackApiError(  # type: ignore[no-untyped-call]
             message="", response={"ok": False, "error": "channel_not_found"}
         )
 
@@ -142,7 +142,7 @@ class TestSlackSendTool:
         assert "rate_limited" in result
 
 
-@skip_on_missing_imports("slack_sdk", "commsagent-slack")
+@run_for_optional_imports("slack_sdk", "commsagent-slack")
 class TestSlackRetrieveTool:
     @pytest.fixture(autouse=True)
     def mock_webclient(self, monkeypatch: pytest.MonkeyPatch) -> MagicMock:
@@ -306,7 +306,7 @@ class TestSlackRetrieveTool:
     async def test_slack_api_error(self, tool: SlackRetrieveTool, mock_webclient: MagicMock) -> None:
         """Test handling of SlackApiError."""
         mock_instance = mock_webclient.return_value
-        mock_instance.conversations_history.side_effect = SlackApiError(
+        mock_instance.conversations_history.side_effect = SlackApiError(  # type: ignore[no-untyped-call]
             message="", response={"ok": False, "error": "channel_not_found"}
         )
 

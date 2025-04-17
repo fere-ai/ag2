@@ -5,16 +5,15 @@
 from typing import Annotated, Any, Callable
 from unittest.mock import patch
 
-import pytest
-
-from autogen.import_utils import skip_on_missing_imports
+from autogen.agentchat import AssistantAgent
+from autogen.import_utils import run_for_optional_imports
 from autogen.tools.dependency_injection import Depends, on
 from autogen.tools.experimental import DeepResearchTool
 
 from ....conftest import Credentials
 
 
-@skip_on_missing_imports(
+@run_for_optional_imports(
     ["langchain_openai", "browser_use"],
     "browser-use",
 )
@@ -37,8 +36,69 @@ class TestDeepResearchTool:
         }
         assert tool.function_schema == expected_schema
 
+    def test_get_generate_subquestions(self, mock_credentials: Credentials) -> None:
+        generate_subquestions = DeepResearchTool._get_generate_subquestions(
+            llm_config=mock_credentials.llm_config,
+            max_web_steps=30,
+        )
+
+        assistant = AssistantAgent(
+            name="assistant",
+            llm_config=mock_credentials.llm_config,
+        )
+        assistant.register_for_llm(description="Generate subquestions for a given question.")(generate_subquestions)
+        expected_tools = [
+            {
+                "type": "function",
+                "function": {
+                    "description": "Generate subquestions for a given question.",
+                    "name": "generate_subquestions",
+                    "parameters": {
+                        "type": "object",
+                        "properties": {
+                            "task": {
+                                "$defs": {
+                                    "Subquestion": {
+                                        "properties": {
+                                            "question": {
+                                                "description": "The original question.",
+                                                "title": "Question",
+                                                "type": "string",
+                                            }
+                                        },
+                                        "required": ["question"],
+                                        "title": "Subquestion",
+                                        "type": "object",
+                                    }
+                                },
+                                "properties": {
+                                    "question": {
+                                        "description": "The original question.",
+                                        "title": "Question",
+                                        "type": "string",
+                                    },
+                                    "subquestions": {
+                                        "description": "The subquestions that need to be answered.",
+                                        "items": {"$ref": "#/$defs/Subquestion"},
+                                        "title": "Subquestions",
+                                        "type": "array",
+                                    },
+                                },
+                                "required": ["question", "subquestions"],
+                                "title": "Task",
+                                "type": "object",
+                                "description": "task",
+                            }
+                        },
+                        "required": ["task"],
+                    },
+                },
+            }
+        ]
+        assert assistant.llm_config["tools"] == expected_tools, assistant.llm_config["tools"]  # type: ignore[index]
+
     # gpt-4o-mini isn't good enough to answer this question
-    @pytest.mark.openai
+    @run_for_optional_imports("openai", "openai")
     def test_answer_question(self, credentials_gpt_4o: Credentials) -> None:
         result = DeepResearchTool._answer_question(
             question="Who are the founders of the AG2 framework?",
@@ -51,7 +111,7 @@ class TestDeepResearchTool:
         result = result.lower()
         assert "wang" in result or "wu" in result
 
-    @pytest.mark.openai
+    @run_for_optional_imports("openai", "openai")
     def test_get_split_question_and_answer_subquestions(self, credentials_gpt_4o_mini: Credentials) -> None:
         max_web_steps = 30
         split_question_and_answer_subquestions = DeepResearchTool._get_split_question_and_answer_subquestions(
@@ -74,7 +134,7 @@ class TestDeepResearchTool:
 
         mock_answer_question.assert_called()
 
-    @pytest.mark.openai
+    @run_for_optional_imports("openai", "openai")
     def test_delegate_research_task(self, credentials_gpt_4o_mini: Credentials) -> None:
         expected_max_web_steps = 30
 

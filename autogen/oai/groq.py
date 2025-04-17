@@ -27,14 +27,14 @@ import copy
 import os
 import time
 import warnings
-from typing import Any
+from typing import Any, Literal, Optional
 
-from openai.types.chat import ChatCompletion, ChatCompletionMessageToolCall
-from openai.types.chat.chat_completion import ChatCompletionMessage, Choice
-from openai.types.completion_usage import CompletionUsage
+from pydantic import Field
 
 from ..import_utils import optional_import_block, require_optional_import
+from ..llm_config import LLMConfigEntry, register_llm_config
 from .client_utils import should_hide_tools, validate_parameter
+from .oai_models import ChatCompletion, ChatCompletionMessage, ChatCompletionMessageToolCall, Choice, CompletionUsage
 
 with optional_import_block():
     from groq import Groq, Stream
@@ -48,6 +48,23 @@ GROQ_PRICING_1K = {
 }
 
 
+@register_llm_config
+class GroqLLMConfigEntry(LLMConfigEntry):
+    api_type: Literal["groq"] = "groq"
+    frequency_penalty: float = Field(default=None, ge=-2, le=2)
+    max_tokens: int = Field(default=None, ge=0)
+    presence_penalty: float = Field(default=None, ge=-2, le=2)
+    seed: int = Field(default=None)
+    stream: bool = Field(default=False)
+    temperature: float = Field(default=1, ge=0, le=2)
+    top_p: float = Field(default=None)
+    hide_tools: Literal["if_all_run", "if_any_run", "never"] = "never"
+    tool_choice: Optional[Literal["none", "auto", "required"]] = None
+
+    def create_client(self):
+        raise NotImplementedError("GroqLLMConfigEntry.create_client is not implemented.")
+
+
 class GroqClient:
     """Client for Groq's API."""
 
@@ -55,7 +72,7 @@ class GroqClient:
         """Requires api_key or environment variable to be set
 
         Args:
-            api_key (str): The API key for using Groq (or environment variable GROQ_API_KEY needs to be set)
+            **kwargs: Additional parameters to pass to the Groq API
         """
         # Ensure we have the api_key upon instantiation
         self.api_key = kwargs.get("api_key")
@@ -117,6 +134,10 @@ class GroqClient:
         groq_params["stream"] = validate_parameter(params, "stream", bool, True, False, None, None)
         groq_params["temperature"] = validate_parameter(params, "temperature", (int, float), True, 1, (0, 2), None)
         groq_params["top_p"] = validate_parameter(params, "top_p", (int, float), True, None, None, None)
+        if "tool_choice" in params:
+            groq_params["tool_choice"] = validate_parameter(
+                params, "tool_choice", str, True, None, None, ["none", "auto", "required"]
+            )
 
         # Groq parameters not supported by their models yet, ignoring
         # logit_bias, logprobs, top_logprobs
@@ -133,7 +154,7 @@ class GroqClient:
     def create(self, params: dict) -> ChatCompletion:
         messages = params.get("messages", [])
 
-        # Convert AutoGen messages to Groq messages
+        # Convert AG2 messages to Groq messages
         groq_messages = oai_messages_to_groq_messages(messages)
 
         # Parse parameters to the Groq API's parameters
