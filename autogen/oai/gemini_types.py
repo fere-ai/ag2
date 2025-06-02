@@ -4,7 +4,7 @@
 
 import enum
 import warnings
-from typing import Any, Optional, Type, TypeVar, TypedDict, Union, get_args, get_origin
+from typing import Any, Optional, Type, TypeVar, Union, get_args, get_origin
 
 from pydantic import BaseModel as BaseModel
 from pydantic import ConfigDict, Field, alias_generators
@@ -108,6 +108,25 @@ class FunctionCallingConfigMode(CaseInSensitiveEnum):
     NONE = "NONE"
 
 
+class LatLng(CommonBaseModel):
+    """An object that represents a latitude/longitude pair.
+
+    This is expressed as a pair of doubles to represent degrees latitude and
+    degrees longitude. Unless specified otherwise, this object must conform to the
+    <a href="https://en.wikipedia.org/wiki/World_Geodetic_System#1984_version">
+    WGS84 standard</a>. Values must be within normalized ranges.
+    """
+
+    latitude: Optional[float] = Field(
+        default=None,
+        description="""The latitude in degrees. It must be in the range [-90.0, +90.0].""",
+    )
+    longitude: Optional[float] = Field(
+        default=None,
+        description="""The longitude in degrees. It must be in the range [-180.0, +180.0]""",
+    )
+
+
 class FunctionCallingConfig(CommonBaseModel):
     """Function calling config."""
 
@@ -118,17 +137,10 @@ class FunctionCallingConfig(CommonBaseModel):
     )
 
 
-class FunctionCallingConfigDict(TypedDict, total=False):
-    """Function calling config."""
+class RetrievalConfig(CommonBaseModel):
+    """Retrieval config."""
 
-    mode: Optional[FunctionCallingConfigMode]
-    """Optional. Function calling mode."""
-
-    allowed_function_names: Optional[list[str]]
-    """Optional. Function names to call. Only set when the Mode is ANY. Function names should match [FunctionDeclaration.name]. With mode set to ANY, model will predict a function call from the set of function names provided."""
-
-
-FunctionCallingConfigOrDict = Union[FunctionCallingConfig, FunctionCallingConfigDict]
+    lat_lng: Optional[LatLng] = Field(default=None, description="""Optional. The location of the user.""")
 
 
 class ToolConfig(CommonBaseModel):
@@ -140,16 +152,4 @@ class ToolConfig(CommonBaseModel):
     function_calling_config: Optional[FunctionCallingConfig] = Field(
         default=None, description="""Optional. Function calling config."""
     )
-
-
-class ToolConfigDict(TypedDict, total=False):
-    """Tool config.
-
-    This config is shared for all tools provided in the request.
-    """
-
-    function_calling_config: Optional[FunctionCallingConfigDict]
-    """Optional. Function calling config."""
-
-
-ToolConfigOrDict = Union[ToolConfig, ToolConfigDict]
+    retrieval_config: Optional[RetrievalConfig] = Field(default=None, description="""Optional. Retrieval config.""")

@@ -5,17 +5,22 @@
 from .browser_use import BrowserUseTool
 from .crawl4ai import Crawl4AITool
 from .deep_research import DeepResearchTool
-from .google_search import GoogleSearchTool
-from .google_search.youtube_search import YoutubeSearchTool
+from .duckduckgo import DuckDuckGoSearchTool
+from .google_search import GoogleSearchTool, YoutubeSearchTool
 from .messageplatform import (
     DiscordRetrieveTool,
     DiscordSendTool,
+    SlackRetrieveRepliesTool,
     SlackRetrieveTool,
     SlackSendTool,
     TelegramRetrieveTool,
     TelegramSendTool,
 )
 from .perplexity import PerplexitySearchTool
+from .reliable import ReliableTool, ReliableToolError, SuccessfulExecutionParameters, ToolExecutionDetails
+from .tavily import TavilySearchTool
+from .web_search_preview import WebSearchPreviewTool
+from .wikipedia import WikipediaPageLoadTool, WikipediaQueryRunTool
 
 __all__ = [
     "BrowserUseTool",
@@ -23,11 +28,21 @@ __all__ = [
     "DeepResearchTool",
     "DiscordRetrieveTool",
     "DiscordSendTool",
+    "DuckDuckGoSearchTool",
     "GoogleSearchTool",
     "PerplexitySearchTool",
+    "ReliableTool",
+    "ReliableToolError",
+    "SlackRetrieveRepliesTool",
     "SlackRetrieveTool",
     "SlackSendTool",
+    "SuccessfulExecutionParameters",
+    "TavilySearchTool",
     "TelegramRetrieveTool",
     "TelegramSendTool",
+    "ToolExecutionDetails",
+    "WebSearchPreviewTool",
+    "WikipediaPageLoadTool",
+    "WikipediaQueryRunTool",
     "YoutubeSearchTool",
 ]
