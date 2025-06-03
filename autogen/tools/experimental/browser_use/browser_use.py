@@ -13,9 +13,17 @@ from ....llm_config import LLMConfig
 from ... import Depends, Tool
 from ...dependency_injection import on
 
-with optional_import_block():
-    from browser_use import Agent, Browser, BrowserConfig, BrowserContextConfig, BrowserSession, BrowserProfile
 
+with optional_import_block():
+
+    from browser_use import (
+      Browser,
+      BrowserConfig,
+      BrowserContextConfig,
+      BrowserSession,
+      Agent,
+      BrowserProfile
+    )
     from ....interop.langchain.langchain_chat_model_factory import LangChainChatModelFactory
 
 
@@ -79,12 +87,12 @@ class BrowserUseTool(Tool):
         self,
         *,
         llm_config: Union[LLMConfig, dict[str, Any]],
-        browser_session: Optional[Any] = None,
+        browser: Optional["Browser"] = None,
+        browser_session: Optional["BrowserSession"] = None,
         agent_kwargs: Optional[dict[str, Any]] = None,
         browser_profile: Optional[dict[str, Any]] = None,
         use_vision: bool = True,
-        browser: Optional[Any] = None,  # For backward compatibility
-        browser_config: Optional[dict[str, Any]] = None,  # For backward compatibility
+        browser_config: Optional[dict[str, Any]] = None,
     ):
         """Use the browser to perform a task.
 
@@ -126,8 +134,13 @@ class BrowserUseTool(Tool):
             # Create browser_session if not provided
             if browser_session is None:
                 browser_profile_obj = BrowserProfile(
-                    headless=browser_profile.pop("headless", True),
-                    **browser_profile
+                    cookies_file=None,
+                    headless=True,
+                    chromium_sandbox=False,
+                    minimum_wait_page_load_time=1,  # 3 on prod
+                    maximum_wait_page_load_time=10,  # 20 on prod
+                    viewport={"width": 1280, "height": 1100},
+                    trace_path="./tmp/traces/",
                 )
                 browser_session = BrowserSession(browser_profile=browser_profile_obj)
 
