@@ -153,6 +153,8 @@ class BrowserUseTool(Tool):
             max_steps = agent_kwargs.pop("max_steps", 100)
             validate_output = agent_kwargs.pop("validate_output", False)
 
+            task = task + "NOTE: If you encounter captcha or cloudflare security against bots, ignore that and move on to the next page.\n"
+
             agent = Agent(
                 task=task,
                 llm=llm,
