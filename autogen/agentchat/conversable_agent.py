@@ -56,7 +56,8 @@ from ..events.agent_events import (
     PostCarryoverProcessingEvent,
     RunCompletionEvent,
     TerminationAndHumanReplyNoInputEvent,
-    TerminationEvent,
+    TerminationWithMetaEvent,
+    TerminationWithMetaEvent,
     UsingAutoReplyEvent,
     create_received_event_model,
 )
@@ -166,6 +167,7 @@ class ConversableAgent(LLMAgent):
             Union[list[Union[Callable, UpdateSystemMessage]], Callable, UpdateSystemMessage]
         ] = None,
         handoffs: Optional[Handoffs] = None,
+        metadata: Optional[dict[str, Any]] = None,
     ):
         """
         Args:
@@ -222,6 +224,7 @@ class ConversableAgent(LLMAgent):
             functions (List[Callable[..., Any]]): A list of functions to register with the agent, these will be wrapped up as tools and registered for LLM (not execution).
             update_agent_state_before_reply (List[Callable[..., Any]]): A list of functions, including UpdateSystemMessage's, called to update the agent before it replies.
             handoffs (Handoffs): Handoffs object containing all handoff transition conditions.
+        metadata (dict[str, Any]): Metadata for the agent, can be used to store additional information about the agent.
         """
         self.handoffs = handoffs if handoffs is not None else Handoffs()
 
@@ -292,6 +295,7 @@ class ConversableAgent(LLMAgent):
         self.context_variables = context_variables if context_variables is not None else ContextVariables()
 
         self._tools: list[Tool] = []
+        self.meta = metadata if metadata is not None else {}
 
         # Register functions to the agent
         if isinstance(functions, list):
@@ -1459,7 +1463,7 @@ class ConversableAgent(LLMAgent):
                 # check recipient max consecutive auto reply limit
                 if self._consecutive_auto_reply_counter[recipient] >= recipient._max_consecutive_auto_reply:
                     break
-                if i == 0:
+                if i == 0:TerminationWithMetaEvent
                     if isinstance(message, Callable):
                         msg2send = message(_chat_info["sender"], _chat_info["recipient"], kwargs)
                     else:
@@ -1471,7 +1475,7 @@ class ConversableAgent(LLMAgent):
                 self.send(msg2send, recipient, request_reply=True, silent=silent)
 
             else:  # No breaks in the for loop, so we have reached max turns
-                iostream.send(TerminationEvent(termination_reason=f"Maximum turns ({max_turns}) reached"))
+                iostream.send(TerminationWithMetaEvent(termination_reason=f"Maximum turns ({max_turns}) reached", meta=self.meta))
         else:
             self._prepare_chat(recipient, clear_history)
             if isinstance(message, Callable):
@@ -1651,7 +1655,7 @@ class ConversableAgent(LLMAgent):
                     break
                 await self.a_send(msg2send, recipient, request_reply=True, silent=silent)
             else:  # No breaks in the for loop, so we have reached max turns
-                iostream.send(TerminationEvent(termination_reason=f"Maximum turns ({max_turns}) reached"))
+                iostream.send(TerminationWithMetaEvent(termination_reason=f"Maximum turns ({max_turns}) reached", meta=self.meta))
         else:
             self._prepare_chat(recipient, clear_history)
             if isinstance(message, Callable):
@@ -2587,7 +2591,7 @@ class ConversableAgent(LLMAgent):
             self._consecutive_auto_reply_counter[sender] = 0
 
             if termination_reason:
-                iostream.send(TerminationEvent(termination_reason=termination_reason))
+                iostream.send(TerminationWithMetaEvent(termination_reason=termination_reason, meta=self.meta))
 
             return True, None
 
@@ -2727,7 +2731,7 @@ class ConversableAgent(LLMAgent):
             self._consecutive_auto_reply_counter[sender] = 0
 
             if termination_reason:
-                iostream.send(TerminationEvent(termination_reason=termination_reason))
+                iostream.send(TerminationWithMetaEvent(termination_reason=termination_reason, meta=self.meta))
 
             return True, None
 
