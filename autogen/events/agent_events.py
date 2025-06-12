@@ -686,6 +686,26 @@ class TerminationEvent(BaseEvent):
 
         f(colored(f"\n>>>>>>>> TERMINATING RUN ({str(self.uuid)}): {self.termination_reason}", "red"), flush=True)
 
+@wrap_event
+class TerminationWithMetaEvent(TerminationEvent):
+    """When a workflow termination condition is met with additional metadata"""
+
+    meta: Optional[dict[str, Any]] = None
+
+    def __init__(
+        self,
+        *,
+        uuid: Optional[UUID] = None,
+        termination_reason: str,
+        meta: Optional[dict[str, Any]] = None,
+    ):
+        super().__init__(uuid=uuid, termination_reason=termination_reason)
+        self.meta = meta
+
+    def print(self, f: Optional[Callable[..., Any]] = None) -> None:
+        super().print(f)
+        if self.meta:
+            f(f"Meta information: {self.meta}", flush=True)
 
 @wrap_event
 class ExecuteCodeBlockEvent(BaseEvent):
