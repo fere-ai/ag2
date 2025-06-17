@@ -1143,10 +1143,14 @@ class TestTerminationAndHumanReplyEvent:
 class TestTerminationEvent:
     def test_print(self, uuid: UUID) -> None:
         termination_reason = "User requested to end the conversation."
+        mock_sender = MagicMock(spec=ConversableAgent)
+        mock_recipient = MagicMock(spec=ConversableAgent)
 
         actual = TerminationEvent(
             uuid=uuid,
             termination_reason=termination_reason,
+            sender=mock_sender,
+            recipient=mock_recipient,
         )
         assert isinstance(actual, TerminationEvent)
 
@@ -1171,10 +1175,14 @@ class TestTerminationEvent:
 
     def test_serialization_and_deserialization(self, uuid: UUID) -> None:
         termination_reason = "User requested to end the conversation."
+        mock_sender = MagicMock(spec=ConversableAgent)
+        mock_recipient = MagicMock(spec=ConversableAgent)
 
         actual = TerminationEvent(
             uuid=uuid,
             termination_reason=termination_reason,
+            sender=mock_sender,
+            recipient=mock_recipient,
         )
         assert isinstance(actual, TerminationEvent)
 

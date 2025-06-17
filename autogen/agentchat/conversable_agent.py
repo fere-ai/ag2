@@ -1471,7 +1471,11 @@ class ConversableAgent(LLMAgent):
                 self.send(msg2send, recipient, request_reply=True, silent=silent)
 
             else:  # No breaks in the for loop, so we have reached max turns
-                iostream.send(TerminationEvent(termination_reason=f"Maximum turns ({max_turns}) reached"))
+                iostream.send(
+                    TerminationEvent(
+                        termination_reason=f"Maximum turns ({max_turns}) reached", sender=self, recipient=recipient
+                    )
+                )
         else:
             self._prepare_chat(recipient, clear_history)
             if isinstance(message, Callable):
@@ -1556,7 +1560,7 @@ class ConversableAgent(LLMAgent):
                                 summary=chat_result.summary,
                                 cost=chat_result.cost,
                                 last_speaker=self.name,
-                            )
+                            )  # type: ignore
                         )
                     except Exception as e:
                         response.iostream.send(ErrorEvent(error=e))
@@ -1585,16 +1589,16 @@ class ConversableAgent(LLMAgent):
                         response._summary = chat_result.summary
                         response._messages = chat_result.chat_history
 
-                        _last_speaker = recipient if chat_result.chat_history[-1]["name"] == recipient.name else self
+                        last_speaker = recipient if chat_result.chat_history[-1]["name"] == recipient.name else self
                         if hasattr(recipient, "last_speaker"):
-                            _last_speaker = recipient.last_speaker
+                            last_speaker = recipient.last_speaker
 
                         IOStream.get_default().send(
                             RunCompletionEvent(
                                 history=chat_result.chat_history,
                                 summary=chat_result.summary,
                                 cost=chat_result.cost,
-                                last_speaker=_last_speaker.name,
+                                last_speaker=last_speaker.name,
                             )
                         )
                     except Exception as e:
@@ -1651,7 +1655,11 @@ class ConversableAgent(LLMAgent):
                     break
                 await self.a_send(msg2send, recipient, request_reply=True, silent=silent)
             else:  # No breaks in the for loop, so we have reached max turns
-                iostream.send(TerminationEvent(termination_reason=f"Maximum turns ({max_turns}) reached"))
+                iostream.send(
+                    TerminationEvent(
+                        termination_reason=f"Maximum turns ({max_turns}) reached", sender=self, recipient=recipient
+                    )
+                )
         else:
             self._prepare_chat(recipient, clear_history)
             if isinstance(message, Callable):
@@ -2587,10 +2595,9 @@ class ConversableAgent(LLMAgent):
             self._consecutive_auto_reply_counter[sender] = 0
 
             if termination_reason:
-                iostream.send(TerminationEvent(termination_reason=termination_reason))
+                iostream.send(TerminationEvent(termination_reason=termination_reason, sender=self, recipient=sender))
 
             return True, None
-
         # send the human reply
         if reply or self._max_consecutive_auto_reply_dict[sender] == 0:
             # reset the consecutive_auto_reply_counter
@@ -2727,7 +2734,7 @@ class ConversableAgent(LLMAgent):
             self._consecutive_auto_reply_counter[sender] = 0
 
             if termination_reason:
-                iostream.send(TerminationEvent(termination_reason=termination_reason))
+                iostream.send(TerminationEvent(termination_reason=termination_reason, sender=self, recipient=sender))
 
             return True, None
 
@@ -3396,7 +3403,7 @@ class ConversableAgent(LLMAgent):
             is_remove: whether removing the tool from llm_config with name 'tool_sig'
             silent_override: whether to print warnings when overriding functions.
         """
-        if not self.llm_config:
+        if self.llm_config is None:
             error_msg = "To update a tool signature, agent must have an llm_config"
             logger.error(error_msg)
             raise AssertionError(error_msg)

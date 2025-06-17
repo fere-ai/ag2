@@ -25,8 +25,8 @@ IS_PIL_AVAILABLE = result.is_successful
 
 if TYPE_CHECKING:
     from ..agentchat.agent import Agent
+    from ..agentchat.conversable_agent import ConversableAgent
     from ..coding.base import CodeBlock
-
 
 __all__ = [
     "ClearAgentsHistoryEvent",
@@ -669,17 +669,23 @@ class TerminationEvent(BaseEvent):
     """When a workflow termination condition is met"""
 
     termination_reason: str
+    sender: Optional["ConversableAgent"] = None
+    recipient: Optional["ConversableAgent"] = None
 
     def __init__(
         self,
         *,
         uuid: Optional[UUID] = None,
         termination_reason: str,
+        sender: Optional["ConversableAgent"] = None,
+        recipient: Optional["ConversableAgent"] = None,
     ):
         super().__init__(
             uuid=uuid,
             termination_reason=termination_reason,
         )
+        self.sender = sender
+        self.recipient = recipient
 
     def print(self, f: Optional[Callable[..., Any]] = None) -> None:
         f = f or print
