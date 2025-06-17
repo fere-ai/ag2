@@ -76,7 +76,7 @@ flaml = [
 # public distributions
 
 openai = [
-    "openai>=1.66.2",
+    "openai>=1.87.0",
 ]
 
 openai-realtime = [
@@ -189,9 +189,8 @@ twilio = [
 ]
 
 mcp = [
-    # mcp 1.6.0 keeps hanging in stdio_client context manager
-    # test_mcp_issue_with_stdio_client_context_manager is failing for mcp=1.6.0
-    "mcp>=1.4.0,<1.6; python_version>='3.10'",
+    # mcp 1.9.4+ fixes issue #1865 where string parameters are converted to integers
+    "mcp>=1.9.4; python_version>='3.10'",
 ]
 
 mcp-proxy-gen = [
@@ -259,6 +258,9 @@ deepseek = ["ag2[openai]"]
 commsagent-discord = ["discord.py>=2.4.0,<2.6"]
 commsagent-slack = ["slack_sdk>=3.33.0,<3.40"]
 commsagent-telegram = ["telethon>=1.38.1, <2"]
+
+duckduckgo = ["duckduckgo_search>=8.0.2"]
+tavily = ["tavily-python>=0.7.4"]
 
 ## dev dependencies
 
