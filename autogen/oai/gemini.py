@@ -243,7 +243,7 @@ class GeminiClient:
         stream = params.get("stream", False)
         n_response = params.get("n", 1)
         system_instruction = self._extract_system_instruction(messages)
-        response_validation = params.get("response_validation", True)
+        response_validation = params.get("response_validation", False)
         tools = self._tools_to_gemini_tools(params["tools"]) if "tools" in params else None
         tool_config = params.get("tool_config")
 
